@@ -183,6 +183,7 @@ impl AiPopupApp {
             self.reload_history();
         }
         sync_history_viewport(ctx, self.show_history);
+        ctx.request_repaint();
     }
 }
 
@@ -505,7 +506,7 @@ impl eframe::App for AiPopupApp {
                                 if entries.is_empty() {
                                     ui.label("No recent history yet. Send a prompt and it will appear here.");
                                 } else {
-                                    let history_height = ui.available_height().max(240.0);
+                                    let history_height = ui.available_height().clamp(240.0, 360.0);
                                     egui::ScrollArea::vertical()
                                         .id_source("history_entries_scroll")
                                         .auto_shrink([false; 2])
@@ -530,8 +531,6 @@ impl eframe::App for AiPopupApp {
                                         });
                                 }
                             });
-                        } else {
-                            ui.add_space(ui.available_height().max(0.0));
                         }
                     });
                 });
