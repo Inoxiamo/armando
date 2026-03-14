@@ -142,7 +142,7 @@ Supported built-in tags include:
 
 Custom aliases defined in `config.yaml` are still supported and can be combined with the built-in tags.
 
-The popup theme is selected from `config.yaml`, but the full color palette now lives in external YAML files under `themes/`. The app currently ships with `default-dark` and `nerv-hud`, and you can also point `theme.path` to a custom theme file.
+The popup theme is selected from `config.yaml`, but the full color palette now lives in external YAML files under `themes/`. The app currently ships with `default-dark`, `nerv-hud`, `nerv-magi-system` and `magi`, and you can also point `theme.path` to a custom theme file.
 
 `nerv-hud` is the default visual preset.
 

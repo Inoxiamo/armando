@@ -12,6 +12,7 @@
 - Sistema di temi configurabile
 - Temi caricati da file YAML esterni
 - Tema di default `NERV HUD`
+- Compatibilita mantenuta con i nomi tema storici `nerv-magi-system` e `magi`
 - History locale persistente con retention a 7 giorni
 - Filtri history per backend e testo
 - Riutilizzo e copia rapida delle entry dalla history

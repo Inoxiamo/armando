@@ -59,6 +59,8 @@ Preset attuali:
 
 - `default-dark`
 - `nerv-hud`
+- `nerv-magi-system`
+- `magi`
 
 La UI usa card con bordo, profondita leggera e aree scroll dedicate per separare risposta e history senza conflitti di input.
 Quando la history viene aperta, la finestra aggiorna `MinInnerSize` e `InnerSize` tramite viewport command nativi per espandersi verso il basso.
