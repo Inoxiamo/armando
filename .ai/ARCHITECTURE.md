@@ -27,6 +27,9 @@
 - `src/history.rs`
   Gestisce persistenza locale della history, retention a 7 giorni e lookup del file `history.jsonl`.
 
+- `src/theme.rs`
+  Carica temi esterni da file YAML e risolve la palette colore usata dalla UI.
+
 - `src/backends/*`
   Implementazioni dei backend AI supportati: Ollama, ChatGPT/OpenAI, Gemini.
 
@@ -44,18 +47,13 @@
 
 ## Theming
 
-Il tema e gestito via configurazione YAML, non via CSS.
-L'approccio e coerente con `egui`, che espone uno style system nativo.
+Il tema e selezionato via configurazione YAML, ma la palette vera e propria vive in file esterni sotto `themes/` oppure in un path custom specificato in config.
+L'approccio resta coerente con `egui`, che espone uno style system nativo.
 
 Campi attuali:
 
-- `preset`
-- `window_fill`
-- `panel_fill`
-- `accent_color`
-- `text_color`
-- `weak_text_color`
-- `border_color`
+- `name`
+- `path`
 
 Preset attuali:
 
@@ -63,6 +61,7 @@ Preset attuali:
 - `nerv-hud`
 
 La UI usa card con bordo, profondita leggera e aree scroll dedicate per separare risposta e history senza conflitti di input.
+Quando la history viene aperta, la finestra aggiorna `MinInnerSize` e `InnerSize` tramite viewport command nativi per espandersi verso il basso.
 
 ## Platform Notes
 

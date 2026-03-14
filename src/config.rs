@@ -22,14 +22,9 @@ pub struct OllamaConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct ThemeConfig {
-    #[serde(default = "default_theme_preset")]
-    pub preset: String,
-    pub window_fill: Option<String>,
-    pub panel_fill: Option<String>,
-    pub accent_color: Option<String>,
-    pub text_color: Option<String>,
-    pub weak_text_color: Option<String>,
-    pub border_color: Option<String>,
+    #[serde(default = "default_theme_name", alias = "preset")]
+    pub name: String,
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -72,7 +67,7 @@ fn default_backend() -> String {
     "ollama".to_string()
 }
 
-fn default_theme_preset() -> String {
+fn default_theme_name() -> String {
     "nerv-hud".to_string()
 }
 

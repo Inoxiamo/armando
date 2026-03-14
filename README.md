@@ -31,9 +31,8 @@ auto_read_selection: true               # Auto-fills the text field with highlig
 paste_response_shortcut: "<ctrl>+<enter>" # Pastes the response automatically into your active window and closes the popup
 
 theme:
-  preset: "nerv-hud"          # default-dark | nerv-hud
-  accent_color: "#8DFF32"     # optional overrides
-  border_color: "#FF7A00"
+  name: "nerv-hud"            # loads ./themes/nerv-hud.yaml
+  # path: "/absolute/path/to/custom-theme.yaml"
 
 gemini:
   api_key: "YOUR_GEMINI_API_KEY"
@@ -143,7 +142,7 @@ Supported built-in tags include:
 
 Custom aliases defined in `config.yaml` are still supported and can be combined with the built-in tags.
 
-The popup theme is configurable from `config.yaml` through the `theme` section. Right now the app ships with a `default-dark` preset and a `nerv-hud` preset, plus optional per-color overrides (`window_fill`, `panel_fill`, `accent_color`, `text_color`, `weak_text_color`, `border_color`).
+The popup theme is selected from `config.yaml`, but the full color palette now lives in external YAML files under `themes/`. The app currently ships with `default-dark` and `nerv-hud`, and you can also point `theme.path` to a custom theme file.
 
 `nerv-hud` is the default visual preset.
 

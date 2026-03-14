@@ -6,6 +6,7 @@ use tokio::runtime::Runtime;
 use crate::backends;
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
+use crate::theme::ResolvedTheme;
 
 enum PasteOutcome {
     Applied,
@@ -15,6 +16,7 @@ enum PasteOutcome {
 
 pub struct AiPopupApp {
     config: Config,
+    theme: ResolvedTheme,
     runtime: Arc<Runtime>,
 
     // UI State
@@ -36,8 +38,13 @@ pub struct AiPopupApp {
 }
 
 impl AiPopupApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, config: Config, runtime: Arc<Runtime>) -> Self {
-        let style = build_style(&config);
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        config: Config,
+        theme: ResolvedTheme,
+        runtime: Arc<Runtime>,
+    ) -> Self {
+        let style = build_style(&theme);
         cc.egui_ctx.set_style(style);
 
         let default_backend = config.default_backend.clone();
@@ -59,6 +66,7 @@ impl AiPopupApp {
 
         Self {
             config,
+            theme,
             runtime,
             prompt: initial_prompt,
             response: String::new(),
@@ -168,6 +176,14 @@ impl AiPopupApp {
             .cloned()
             .collect()
     }
+
+    fn set_history_visibility(&mut self, ctx: &egui::Context, visible: bool) {
+        self.show_history = visible;
+        if self.show_history {
+            self.reload_history();
+        }
+        sync_history_viewport(ctx, self.show_history);
+    }
 }
 
 impl eframe::App for AiPopupApp {
@@ -237,12 +253,12 @@ impl eframe::App for AiPopupApp {
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             let panel_frame = card_frame(
                 ctx,
-                ctx.style().visuals.panel_fill,
-                ctx.style().visuals.window_stroke.color,
+                self.theme.panel_fill_raised,
+                self.theme.border_color,
             );
 
             panel_frame
-                .fill(ctx.style().visuals.panel_fill)
+                .fill(self.theme.panel_fill_raised)
                 .inner_margin(egui::Margin::same(12.0))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
@@ -257,7 +273,7 @@ impl eframe::App for AiPopupApp {
                                 ui.label(
                                     egui::RichText::new("Fast prompts, polished history, instant apply.")
                                         .small()
-                                        .color(ctx.style().visuals.widgets.inactive.fg_stroke.color),
+                                        .color(self.theme.weak_text_color),
                                 );
                             });
 
@@ -284,11 +300,11 @@ impl eframe::App for AiPopupApp {
                         )
                         .show(ui, |ui| {
                             egui::TextEdit::multiline(&mut self.prompt)
-                                    .id(prompt_id)
-                                    .hint_text("Write your prompt here...")
-                                    .desired_width(f32::INFINITY)
-                                    .desired_rows(4)
-                                    .show(ui)
+                                .id(prompt_id)
+                                .hint_text("Write your prompt here...")
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(4)
+                                .show(ui)
                         });
                         let input_output = input_output.inner;
                         let input_resp = &input_output.response;
@@ -332,7 +348,7 @@ impl eframe::App for AiPopupApp {
                             ui.label(
                                 egui::RichText::new(helper_text)
                                     .small()
-                                    .color(ctx.style().visuals.widgets.inactive.fg_stroke.color),
+                                    .color(self.theme.weak_text_color),
                             );
                         });
 
@@ -347,23 +363,23 @@ impl eframe::App for AiPopupApp {
                             };
                             let primary_button = primary_action_button(
                                 "Send Prompt",
-                                ctx.style().visuals.hyperlink_color,
-                                ctx.style().visuals.window_stroke.color,
+                                self.theme.accent_color,
+                                self.theme.border_color,
                                 egui::Color32::BLACK,
                             );
                             let copy_button = secondary_action_button(
                                 "Copy Response",
-                                lighten(ctx.style().visuals.panel_fill, 0.05),
-                                ctx.style().visuals.widgets.inactive.bg_stroke.color,
+                                self.theme.panel_fill_soft,
+                                self.theme.border_color,
                             );
                             let history_button = toggle_action_button(
                                 &history_label,
                                 if self.show_history {
-                                    lighten(ctx.style().visuals.panel_fill, 0.08)
+                                    self.theme.panel_fill_soft
                                 } else {
-                                    darken(ctx.style().visuals.panel_fill, 0.04)
+                                    self.theme.panel_fill
                                 },
-                                ctx.style().visuals.hyperlink_color,
+                                self.theme.accent_color,
                             );
 
                             if ui
@@ -386,10 +402,7 @@ impl eframe::App for AiPopupApp {
                             }
 
                             if ui.add(history_button).clicked() {
-                                self.show_history = !self.show_history;
-                                if self.show_history {
-                                    self.reload_history();
-                                }
+                                self.set_history_visibility(ctx, !self.show_history);
                             }
                         });
 
@@ -408,8 +421,8 @@ impl eframe::App for AiPopupApp {
                         ui.add_space(4.0);
                         card_frame(
                             ctx,
-                            darken(ctx.style().visuals.panel_fill, 0.06),
-                            ctx.style().visuals.widgets.inactive.bg_stroke.color,
+                            self.theme.panel_fill_soft,
+                            self.theme.border_color,
                         )
                         .show(ui, |ui| {
                             let response_height = if self.show_history { 150.0 } else { 250.0 };
@@ -432,21 +445,21 @@ impl eframe::App for AiPopupApp {
 
                             card_frame(
                                 ctx,
-                                darken(ctx.style().visuals.panel_fill, 0.03),
-                                ctx.style().visuals.window_stroke.color,
+                                self.theme.panel_fill_soft,
+                                self.theme.border_color,
                             )
                             .show(ui, |ui| {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label(
                                         egui::RichText::new("Last 7 days")
                                             .small()
-                                            .color(ctx.style().visuals.widgets.inactive.fg_stroke.color),
+                                            .color(self.theme.weak_text_color),
                                     );
 
                                     let open_button = secondary_action_button(
                                         "Open History File",
-                                        lighten(ctx.style().visuals.panel_fill, 0.05),
-                                        ctx.style().visuals.widgets.inactive.bg_stroke.color,
+                                        self.theme.panel_fill_raised,
+                                        self.theme.border_color,
                                     );
                                     if ui.add(open_button).clicked() {
                                         self.history_action_error =
@@ -480,10 +493,10 @@ impl eframe::App for AiPopupApp {
 
                                 if let Some(error) = &self.history_error {
                                     ui.add_space(4.0);
-                                    ui.colored_label(egui::Color32::from_rgb(255, 160, 160), error);
+                                    ui.colored_label(self.theme.danger_color, error);
                                 } else if let Some(error) = &self.history_action_error {
                                     ui.add_space(4.0);
-                                    ui.colored_label(egui::Color32::from_rgb(255, 160, 160), error);
+                                    ui.colored_label(self.theme.danger_color, error);
                                 }
 
                                 ui.add_space(8.0);
@@ -499,7 +512,17 @@ impl eframe::App for AiPopupApp {
                                         .max_height(history_height)
                                         .show(ui, |ui| {
                                             for (index, entry) in entries.iter().enumerate() {
-                                                history_entry_card(ui, ctx, entry, &mut self.prompt, &mut self.response, &mut self.show_history, &mut self.prompt_focus_initialized, &mut self.history_action_error);
+                                                history_entry_card(
+                                                    ui,
+                                                    ctx,
+                                                    &self.theme,
+                                                    entry,
+                                                    &mut self.prompt,
+                                                    &mut self.response,
+                                                    &mut self.show_history,
+                                                    &mut self.prompt_focus_initialized,
+                                                    &mut self.history_action_error,
+                                                );
                                                 if index + 1 < entries.len() {
                                                     ui.add_space(8.0);
                                                 }
@@ -581,6 +604,7 @@ fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -
 fn history_entry_card(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
+    theme: &ResolvedTheme,
     entry: &HistoryEntry,
     prompt: &mut String,
     response: &mut String,
@@ -588,12 +612,7 @@ fn history_entry_card(
     prompt_focus_initialized: &mut bool,
     history_action_error: &mut Option<String>,
 ) {
-    card_frame(
-        ctx,
-        darken(ctx.style().visuals.panel_fill, 0.02),
-        ctx.style().visuals.widgets.inactive.bg_stroke.color,
-    )
-    .show(ui, |ui| {
+    card_frame(ctx, theme.panel_fill_raised, theme.border_color).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 egui::RichText::new(entry.backend.to_uppercase())
@@ -604,7 +623,7 @@ fn history_entry_card(
             ui.label(
                 egui::RichText::new(trim_timestamp(&entry.created_at))
                     .small()
-                    .color(ctx.style().visuals.widgets.inactive.fg_stroke.color),
+                    .color(theme.weak_text_color),
             );
         });
 
@@ -618,16 +637,13 @@ fn history_entry_card(
         ui.label(
             egui::RichText::new(trim_for_preview(&entry.response, 260))
                 .small()
-                .color(ctx.style().visuals.widgets.inactive.fg_stroke.color),
+                .color(theme.weak_text_color),
         );
         ui.add_space(8.0);
 
         ui.horizontal_wrapped(|ui| {
-            let copy_button = secondary_action_button(
-                "Copy Result",
-                lighten(ctx.style().visuals.panel_fill, 0.05),
-                ctx.style().visuals.widgets.inactive.bg_stroke.color,
-            );
+            let copy_button =
+                secondary_action_button("Copy Result", theme.panel_fill_soft, theme.border_color);
             if ui.add(copy_button).clicked() {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     let _ = clipboard.set_text(entry.response.clone());
@@ -637,19 +653,49 @@ fn history_entry_card(
 
             let reuse_button = primary_action_button(
                 "Reuse Entry",
-                ctx.style().visuals.hyperlink_color,
-                ctx.style().visuals.window_stroke.color,
+                theme.accent_color,
+                theme.border_color,
                 egui::Color32::BLACK,
             );
             if ui.add(reuse_button).clicked() {
                 *prompt = entry.prompt.clone();
                 *response = entry.response.clone();
                 *show_history = false;
+                sync_history_viewport(ctx, false);
                 *prompt_focus_initialized = false;
                 *history_action_error = None;
             }
         });
     });
+}
+
+fn sync_history_viewport(ctx: &egui::Context, show_history: bool) {
+    const BASE_MIN_WIDTH: f32 = 520.0;
+    const BASE_MIN_HEIGHT: f32 = 360.0;
+    const HISTORY_MIN_HEIGHT: f32 = 760.0;
+    const HISTORY_TARGET_HEIGHT: f32 = 860.0;
+
+    let current_size = ctx.input(|i| {
+        i.viewport()
+            .inner_rect
+            .map(|rect| rect.size())
+            .unwrap_or(egui::vec2(640.0, 480.0))
+    });
+
+    let min_size = if show_history {
+        egui::vec2(BASE_MIN_WIDTH, HISTORY_MIN_HEIGHT)
+    } else {
+        egui::vec2(BASE_MIN_WIDTH, BASE_MIN_HEIGHT)
+    };
+    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min_size));
+
+    if show_history {
+        let new_height = current_size.y.max(HISTORY_TARGET_HEIGHT);
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            current_size.x.max(BASE_MIN_WIDTH),
+            new_height,
+        )));
+    }
 }
 
 fn trim_for_preview(text: &str, max_chars: usize) -> String {
@@ -825,10 +871,9 @@ fn command_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn build_style(config: &Config) -> egui::Style {
+fn build_style(theme: &ResolvedTheme) -> egui::Style {
     let mut style = egui::Style::default();
     let mut visuals = egui::Visuals::dark();
-    apply_theme_preset(&config.theme.preset, &mut visuals);
     style.text_styles.insert(
         egui::TextStyle::Heading,
         egui::FontId::new(20.0, egui::FontFamily::Monospace),
@@ -846,39 +891,30 @@ fn build_style(config: &Config) -> egui::Style {
         egui::FontId::new(14.0, egui::FontFamily::Monospace),
     );
 
-    if let Some(color) = parse_hex_color(config.theme.window_fill.as_deref()) {
-        visuals.window_fill = color;
-    }
-    if let Some(color) = parse_hex_color(config.theme.panel_fill.as_deref()) {
-        visuals.panel_fill = color;
-        visuals.faint_bg_color = color;
-        visuals.extreme_bg_color = darken(color, 0.18);
-        visuals.code_bg_color = darken(color, 0.1);
-    }
-    if let Some(color) = parse_hex_color(config.theme.accent_color.as_deref()) {
-        visuals.hyperlink_color = color;
-        visuals.selection.bg_fill = color;
-        visuals.widgets.active.bg_fill = color;
-        visuals.widgets.hovered.bg_fill = color;
-        visuals.widgets.open.bg_fill = color;
-        visuals.widgets.active.fg_stroke.color = egui::Color32::BLACK;
-        visuals.widgets.hovered.fg_stroke.color = egui::Color32::BLACK;
-        visuals.widgets.open.fg_stroke.color = egui::Color32::BLACK;
-    }
-    if let Some(color) = parse_hex_color(config.theme.text_color.as_deref()) {
-        visuals.override_text_color = Some(color);
-        visuals.widgets.noninteractive.fg_stroke.color = color;
-        visuals.widgets.inactive.fg_stroke.color = color;
-    }
-    if let Some(color) = parse_hex_color(config.theme.weak_text_color.as_deref()) {
-        visuals.widgets.inactive.fg_stroke.color = color;
-        visuals.widgets.noninteractive.bg_stroke.color = color;
-    }
-    if let Some(color) = parse_hex_color(config.theme.border_color.as_deref()) {
-        visuals.window_stroke.color = color;
-        visuals.widgets.noninteractive.bg_stroke.color = color;
-        visuals.widgets.inactive.bg_stroke.color = color;
-    }
+    visuals.window_fill = theme.window_fill;
+    visuals.panel_fill = theme.panel_fill;
+    visuals.faint_bg_color = theme.panel_fill_soft;
+    visuals.extreme_bg_color = darken(theme.panel_fill_raised, 0.08);
+    visuals.code_bg_color = darken(theme.panel_fill_soft, 0.08);
+    visuals.hyperlink_color = theme.accent_color;
+    visuals.selection.bg_fill = theme.accent_hover_color;
+    visuals.selection.stroke.color = egui::Color32::BLACK;
+    visuals.override_text_color = Some(theme.text_color);
+    visuals.window_stroke.color = theme.border_color;
+    visuals.window_stroke.width = 1.2;
+    visuals.widgets.noninteractive.fg_stroke.color = theme.text_color;
+    visuals.widgets.noninteractive.bg_fill = theme.panel_fill_raised;
+    visuals.widgets.noninteractive.bg_stroke.color = theme.border_color;
+    visuals.widgets.inactive.bg_fill = theme.panel_fill_soft;
+    visuals.widgets.inactive.bg_stroke.color = theme.border_color;
+    visuals.widgets.inactive.fg_stroke.color = theme.text_color;
+    visuals.widgets.hovered.bg_fill = theme.accent_hover_color;
+    visuals.widgets.hovered.bg_stroke.color = theme.border_color;
+    visuals.widgets.hovered.fg_stroke.color = egui::Color32::BLACK;
+    visuals.widgets.active.bg_fill = theme.accent_color;
+    visuals.widgets.active.bg_stroke.color = theme.border_color;
+    visuals.widgets.active.fg_stroke.color = egui::Color32::BLACK;
+    visuals.widgets.open = visuals.widgets.active;
 
     style.visuals = visuals;
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
@@ -909,73 +945,6 @@ fn build_style(config: &Config) -> egui::Style {
         color: egui::Color32::from_black_alpha(86),
     };
     style
-}
-
-fn apply_theme_preset(preset: &str, visuals: &mut egui::Visuals) {
-    match preset.to_lowercase().as_str() {
-        "nerv-hud" | "evangelion" => {
-            visuals.window_fill = color32(0x1b, 0x1f, 0x19);
-            visuals.panel_fill = color32(0x24, 0x2a, 0x21);
-            visuals.faint_bg_color = color32(0x2d, 0x34, 0x28);
-            visuals.extreme_bg_color = color32(0x2a, 0x31, 0x24);
-            visuals.code_bg_color = color32(0x26, 0x2c, 0x20);
-            visuals.window_stroke.color = color32(0xff, 0x7a, 0x00);
-            visuals.window_stroke.width = 1.2;
-            visuals.hyperlink_color = color32(0x8d, 0xff, 0x32);
-            visuals.override_text_color = Some(color32(0xf4, 0xf1, 0xe8));
-            visuals.widgets.inactive.fg_stroke.color = color32(0xc7, 0xcd, 0xbb);
-            visuals.selection.bg_fill = color32(0x8d, 0xff, 0x32);
-            visuals.selection.stroke.color = egui::Color32::BLACK;
-            visuals.widgets.noninteractive.bg_stroke.color = color32(0xff, 0x7a, 0x00);
-            visuals.widgets.inactive.bg_fill = color32(0x31, 0x38, 0x2b);
-            visuals.widgets.inactive.bg_stroke.color = color32(0x73, 0x7c, 0x63);
-            visuals.widgets.inactive.fg_stroke.color = color32(0xf4, 0xf1, 0xe8);
-            visuals.widgets.hovered.bg_fill = color32(0x8d, 0xff, 0x32);
-            visuals.widgets.hovered.bg_stroke.color = color32(0xff, 0x7a, 0x00);
-            visuals.widgets.hovered.fg_stroke.color = egui::Color32::BLACK;
-            visuals.widgets.active.bg_fill = color32(0xff, 0x7a, 0x00);
-            visuals.widgets.active.bg_stroke.color = color32(0x8d, 0xff, 0x32);
-            visuals.widgets.active.fg_stroke.color = egui::Color32::BLACK;
-            visuals.widgets.open = visuals.widgets.active;
-        }
-        "nerv-magi-system" | "magi" => {
-            visuals.window_fill = color32(0x19, 0x14, 0x26);
-            visuals.panel_fill = color32(0x24, 0x1d, 0x38);
-            visuals.faint_bg_color = color32(0x30, 0x28, 0x48);
-            visuals.extreme_bg_color = color32(0x2a, 0x21, 0x40);
-            visuals.code_bg_color = color32(0x22, 0x1b, 0x35);
-            visuals.window_stroke.color = color32(0x6d, 0xff, 0x9a);
-            visuals.window_stroke.width = 1.2;
-            visuals.hyperlink_color = color32(0x8d, 0xff, 0x32);
-            visuals.override_text_color = Some(color32(0xf1, 0xee, 0xff));
-            visuals.selection.bg_fill = color32(0x6d, 0xff, 0x9a);
-            visuals.selection.stroke.color = egui::Color32::BLACK;
-            visuals.widgets.noninteractive.bg_stroke.color = color32(0x8d, 0xff, 0x32);
-            visuals.widgets.inactive.bg_fill = color32(0x34, 0x2a, 0x4e);
-            visuals.widgets.inactive.bg_stroke.color = color32(0x8f, 0x72, 0xd6);
-            visuals.widgets.inactive.fg_stroke.color = color32(0xf1, 0xee, 0xff);
-            visuals.widgets.hovered.bg_fill = color32(0x6d, 0xff, 0x9a);
-            visuals.widgets.hovered.bg_stroke.color = color32(0xb7, 0x8d, 0xff);
-            visuals.widgets.hovered.fg_stroke.color = egui::Color32::BLACK;
-            visuals.widgets.active.bg_fill = color32(0xb7, 0x8d, 0xff);
-            visuals.widgets.active.bg_stroke.color = color32(0x6d, 0xff, 0x9a);
-            visuals.widgets.active.fg_stroke.color = egui::Color32::BLACK;
-            visuals.widgets.open = visuals.widgets.active;
-        }
-        _ => {}
-    }
-}
-
-fn parse_hex_color(value: Option<&str>) -> Option<egui::Color32> {
-    let value = value?.trim().trim_start_matches('#');
-    if value.len() != 6 {
-        return None;
-    }
-
-    let r = u8::from_str_radix(&value[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&value[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&value[4..6], 16).ok()?;
-    Some(color32(r, g, b))
 }
 
 fn darken(color: egui::Color32, amount: f32) -> egui::Color32 {

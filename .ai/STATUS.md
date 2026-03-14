@@ -10,6 +10,7 @@
 - Copia risposta negli appunti
 - Shortcut `Ctrl+Enter` per apply/copy-and-close
 - Sistema di temi configurabile
+- Temi caricati da file YAML esterni
 - Tema di default `NERV HUD`
 - History locale persistente con retention a 7 giorni
 - Filtri history per backend e testo
@@ -23,6 +24,7 @@
 - Il tema viene applicato da `config.yaml` all'apertura della UI
 - La history viene ricaricata all'apertura del pannello e dopo ogni risposta completata con successo
 - La lista history usa un'area scroll dedicata separata dallo scroll del resto della finestra
+- L'apertura della history espande nativamente la finestra verso il basso per evitare che il pannello resti nascosto
 - Le azioni principali sono etichettate in modo esplicito per evitare pulsanti ambigui
 
 ## Known Gaps

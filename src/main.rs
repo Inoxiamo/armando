@@ -3,10 +3,13 @@ mod config;
 mod daemon;
 mod gui;
 mod history;
+mod theme;
 
 use eframe::egui;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
+
+use crate::theme::load_theme;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -24,6 +27,7 @@ fn main() -> anyhow::Result<()> {
 fn run_ui(cfg: config::Config) -> anyhow::Result<()> {
     // Create tokio runtime for async backend queries
     let rt = Arc::new(Runtime::new()?);
+    let theme = load_theme(&cfg)?;
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -39,7 +43,7 @@ fn run_ui(cfg: config::Config) -> anyhow::Result<()> {
     eframe::run_native(
         "AI Assistant",
         options,
-        Box::new(move |cc| Box::new(gui::AiPopupApp::new(cc, cfg, rt))),
+        Box::new(move |cc| Box::new(gui::AiPopupApp::new(cc, cfg, theme, rt))),
     )
     .map_err(|e| anyhow::anyhow!("eframe error: {:?}", e))
 }

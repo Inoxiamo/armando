@@ -24,6 +24,7 @@
 
 - [x] Prima revisione visuale del tema `NERV HUD` con card, ombre leggere e bottoni piu leggibili
 - [x] History persistente consultabile dal popup con filtri e azioni rapide
+- [x] Temi esternalizzati in file dedicati e selezionabili da configurazione
 - [ ] Refinement visuale finale del tema `NERV HUD`
 - [ ] Preset aggiuntivi e override piu completi
 - [ ] Streaming della risposta
