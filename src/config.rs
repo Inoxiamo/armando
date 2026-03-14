@@ -20,11 +20,20 @@ pub struct OllamaConfig {
     pub model: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ThemeConfig {
     #[serde(default = "default_theme_name", alias = "preset")]
     pub name: String,
     pub path: Option<PathBuf>,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            name: default_theme_name(),
+            path: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -102,5 +111,37 @@ impl Config {
         }
 
         anyhow::bail!("config.yaml not found in any of the expected locations.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_config_defaults_to_nerv_hud() {
+        let theme = ThemeConfig::default();
+        assert_eq!(theme.name, "nerv-hud");
+        assert!(theme.path.is_none());
+    }
+
+    #[test]
+    fn theme_config_supports_legacy_preset_alias() {
+        let yaml = "theme:\n  preset: nerv-magi-system\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(config.theme.name, "nerv-magi-system");
+    }
+
+    #[test]
+    fn config_defaults_are_applied_when_fields_are_missing() {
+        let yaml = "{}";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(config.hotkey, "<ctrl>+<space>");
+        assert_eq!(config.paste_response_shortcut, "<ctrl>+<enter>");
+        assert_eq!(config.default_backend, "ollama");
+        assert!(config.auto_read_selection);
+        assert_eq!(config.theme.name, "nerv-hud");
     }
 }

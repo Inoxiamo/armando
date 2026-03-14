@@ -86,3 +86,29 @@ fn spawn_ui() -> anyhow::Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_hotkey_supports_ctrl_space() {
+        let hotkey = parse_hotkey("<ctrl>+<space>").unwrap();
+        assert_eq!(hotkey.key, Code::Space);
+        assert_eq!(hotkey.mods, Modifiers::CONTROL);
+    }
+
+    #[test]
+    fn parse_hotkey_supports_meta_and_letter() {
+        let hotkey = parse_hotkey("<cmd>+a").unwrap();
+        assert_eq!(hotkey.key, Code::KeyA);
+        assert_eq!(hotkey.mods, Modifiers::SUPER);
+    }
+
+    #[test]
+    fn parse_hotkey_defaults_unknown_keys_to_space() {
+        let hotkey = parse_hotkey("<ctrl>+z").unwrap();
+        assert_eq!(hotkey.key, Code::Space);
+        assert_eq!(hotkey.mods, Modifiers::CONTROL);
+    }
+}

@@ -140,3 +140,112 @@ fn parse_hex_color(value: &str) -> anyhow::Result<egui::Color32> {
     let b = u8::from_str_radix(&value[4..6], 16)?;
     Ok(egui::Color32::from_rgb(r, g, b))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ThemeConfig;
+
+    #[test]
+    fn resolve_theme_definition_parses_all_colors() {
+        let resolved = ThemeDefinition {
+            name: "Test".to_string(),
+            window_fill: "#010203".to_string(),
+            panel_fill: "#111213".to_string(),
+            panel_fill_soft: "#212223".to_string(),
+            panel_fill_raised: "#313233".to_string(),
+            accent_color: "#414243".to_string(),
+            accent_hover_color: "#515253".to_string(),
+            accent_text_color: "#616263".to_string(),
+            text_color: "#717273".to_string(),
+            weak_text_color: "#818283".to_string(),
+            border_color: "#919293".to_string(),
+            danger_color: "#A1A2A3".to_string(),
+        }
+        .resolve()
+        .unwrap();
+
+        assert_eq!(resolved.window_fill, egui::Color32::from_rgb(1, 2, 3));
+        assert_eq!(
+            resolved.accent_text_color,
+            egui::Color32::from_rgb(97, 98, 99)
+        );
+        assert_eq!(
+            resolved.danger_color,
+            egui::Color32::from_rgb(161, 162, 163)
+        );
+    }
+
+    #[test]
+    fn parse_hex_color_rejects_invalid_length() {
+        let err = parse_hex_color("#12345").unwrap_err().to_string();
+        assert!(err.contains("expected 6 hex characters"));
+    }
+
+    #[test]
+    fn resolve_relative_to_config_uses_config_parent() {
+        let config_path = Path::new("/tmp/test-popup-ai/config.yaml");
+        let resolved =
+            resolve_relative_to_config(Path::new("themes/custom.yaml"), Some(config_path));
+
+        assert_eq!(
+            resolved,
+            PathBuf::from("/tmp/test-popup-ai/themes/custom.yaml")
+        );
+    }
+
+    #[test]
+    fn candidate_theme_paths_include_config_relative_location() {
+        let config_path = Path::new("/tmp/test-popup-ai/config.yaml");
+        let paths = candidate_theme_paths("nerv-hud", Some(config_path));
+
+        assert!(paths.contains(&PathBuf::from("/tmp/test-popup-ai/themes/nerv-hud.yaml")));
+    }
+
+    #[test]
+    fn load_theme_uses_explicit_path() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test-popup-ai-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let theme_path = temp_dir.join("custom.yaml");
+        std::fs::write(
+            &theme_path,
+            "\
+name: Custom\n\
+window_fill: \"#010203\"\n\
+panel_fill: \"#111213\"\n\
+panel_fill_soft: \"#212223\"\n\
+panel_fill_raised: \"#313233\"\n\
+accent_color: \"#414243\"\n\
+accent_hover_color: \"#515253\"\n\
+accent_text_color: \"#616263\"\n\
+text_color: \"#717273\"\n\
+weak_text_color: \"#818283\"\n\
+border_color: \"#919293\"\n\
+danger_color: \"#A1A2A3\"\n",
+        )
+        .unwrap();
+
+        let config = Config {
+            hotkey: "<ctrl>+<space>".to_string(),
+            aliases: None,
+            auto_read_selection: true,
+            paste_response_shortcut: "<ctrl>+<enter>".to_string(),
+            default_backend: "ollama".to_string(),
+            theme: ThemeConfig {
+                name: "ignored".to_string(),
+                path: Some(theme_path.clone()),
+            },
+            gemini: None,
+            chatgpt: None,
+            ollama: None,
+            loaded_from: None,
+        };
+
+        let theme = load_theme(&config).unwrap();
+        assert_eq!(theme.panel_fill, egui::Color32::from_rgb(17, 18, 19));
+
+        let _ = std::fs::remove_file(theme_path);
+        let _ = std::fs::remove_dir(temp_dir);
+    }
+}

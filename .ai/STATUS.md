@@ -15,7 +15,7 @@
 - Compatibilita mantenuta con i nomi tema storici `nerv-magi-system` e `magi`
 - Preprompt orientato principalmente a pulizia, ottimizzazione, traduzione e adattamento del testo
 - Toggle UI per passare da modalita text-assist a domanda generica
-- Test unitari di non regressione su prompt preparation, tag parsing e retention della history
+- Test unitari di non regressione su prompt preparation, tag parsing, retention della history, config, theme loading e parsing hotkey
 - History locale persistente con retention a 7 giorni
 - Filtri history per backend e testo
 - Riutilizzo e copia rapida delle entry dalla history
