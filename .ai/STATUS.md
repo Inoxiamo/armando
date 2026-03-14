@@ -14,6 +14,7 @@
 - Tema di default `NERV HUD`
 - Compatibilita mantenuta con i nomi tema storici `nerv-magi-system` e `magi`
 - Preprompt orientato principalmente a pulizia, ottimizzazione, traduzione e adattamento del testo
+- Toggle UI per passare da modalita text-assist a domanda generica
 - History locale persistente con retention a 7 giorni
 - Filtri history per backend e testo
 - Riutilizzo e copia rapida delle entry dalla history
@@ -31,6 +32,7 @@
 - Le azioni principali sono etichettate in modo esplicito per evitare pulsanti ambigui
 - Il testo sui pulsanti accentati e configurabile via `accent_text_color` nel file tema
 - Il comportamento di default dell'assistente privilegia output testuali pronti da riapplicare subito
+- In modalita `Generic question`, il prompt viene trattato come domanda diretta e non come testo da formattare
 
 ## Known Gaps
 

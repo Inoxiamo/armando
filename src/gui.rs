@@ -1,10 +1,10 @@
 use eframe::egui;
 use egui::text::{CCursor, CCursorRange};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tokio::runtime::Runtime;
 
 use crate::backends;
+use crate::backends::PromptMode;
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::theme::ResolvedTheme;
@@ -27,13 +27,13 @@ pub struct AiPopupApp {
     is_loading: bool,
     auto_paste_on_finish: bool,
     prompt_focus_initialized: bool,
+    generic_question_mode: bool,
     history_entries: Vec<HistoryEntry>,
     history_error: Option<String>,
     show_history: bool,
     history_filter_backend: String,
     history_filter_query: String,
     history_action_error: Option<String>,
-    pending_history_viewport_sync: Option<bool>,
 
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
@@ -76,13 +76,13 @@ impl AiPopupApp {
             is_loading: false,
             auto_paste_on_finish: false,
             prompt_focus_initialized: false,
+            generic_question_mode: false,
             history_entries,
             history_error,
             show_history: false,
             history_filter_backend: "all".to_string(),
             history_filter_query: String::new(),
             history_action_error: None,
-            pending_history_viewport_sync: None,
             async_response: Arc::new(Mutex::new(None)),
         }
     }
@@ -134,13 +134,18 @@ impl AiPopupApp {
 
         let prompt = self.prompt.clone();
         let backend = self.selected_backend.clone();
+        let mode = if self.generic_question_mode {
+            PromptMode::GenericQuestion
+        } else {
+            PromptMode::TextAssist
+        };
         let config = self.config.clone();
         let async_response = self.async_response.clone();
         let ctx = ctx.clone();
 
         // Spawn async task
         self.runtime.spawn(async move {
-            let res = backends::query(&backend, &prompt, &config).await;
+            let res = backends::query(&backend, &prompt, &config, mode).await;
 
             // Store result
             *async_response.lock().unwrap() = Some(Ok(res));
@@ -185,19 +190,13 @@ impl AiPopupApp {
         if self.show_history {
             self.reload_history();
         }
-        self.pending_history_viewport_sync = Some(self.show_history);
+        sync_history_viewport(ctx, self.show_history);
         ctx.request_repaint();
-        ctx.request_repaint_after(Duration::from_millis(16));
     }
 }
 
 impl eframe::App for AiPopupApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some(show_history) = self.pending_history_viewport_sync.take() {
-            sync_history_viewport(ctx, show_history);
-            ctx.request_repaint_after(Duration::from_millis(16));
-        }
-
         self.check_async_response(ctx);
 
         // Handle global Esc to close
@@ -271,6 +270,10 @@ impl eframe::App for AiPopupApp {
                 .fill(self.theme.panel_fill_raised)
                 .inner_margin(egui::Margin::same(12.0))
                 .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_source("main_content_scroll")
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -361,6 +364,10 @@ impl eframe::App for AiPopupApp {
                                     .color(self.theme.weak_text_color),
                             );
                         });
+
+                        ui.add_space(6.0);
+
+                        ui.checkbox(&mut self.generic_question_mode, "Generic question mode");
 
                         ui.add_space(6.0);
 
@@ -542,6 +549,7 @@ impl eframe::App for AiPopupApp {
                             });
                         }
                     });
+                        });
                 });
         });
     }
@@ -675,7 +683,6 @@ fn history_entry_card(
                 *prompt_focus_initialized = false;
                 *history_action_error = None;
                 ctx.request_repaint();
-                ctx.request_repaint_after(Duration::from_millis(16));
             }
         });
     });
@@ -684,42 +691,13 @@ fn history_entry_card(
 fn sync_history_viewport(ctx: &egui::Context, show_history: bool) {
     const BASE_MIN_WIDTH: f32 = 520.0;
     const BASE_MIN_HEIGHT: f32 = 360.0;
-    const HISTORY_MIN_HEIGHT: f32 = 620.0;
-    const HISTORY_GROWTH_DELTA: f32 = 220.0;
-    const SCREEN_PADDING: f32 = 80.0;
+    const HISTORY_MIN_HEIGHT: f32 = 520.0;
 
-    let (current_size, monitor_size) = ctx.input(|i| {
-        (
-            i.viewport()
-                .inner_rect
-                .map(|rect| rect.size())
-                .unwrap_or(egui::vec2(640.0, 480.0)),
-            i.viewport().monitor_size,
-        )
-    });
-
-    let min_size = if show_history {
+    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(if show_history {
         egui::vec2(BASE_MIN_WIDTH, HISTORY_MIN_HEIGHT)
     } else {
         egui::vec2(BASE_MIN_WIDTH, BASE_MIN_HEIGHT)
-    };
-    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min_size));
-
-    if show_history {
-        let max_usable_height = monitor_size
-            .map(|size| (size.y - SCREEN_PADDING).max(HISTORY_MIN_HEIGHT))
-            .unwrap_or(HISTORY_MIN_HEIGHT + HISTORY_GROWTH_DELTA);
-        let target_height = (current_size.y + HISTORY_GROWTH_DELTA)
-            .max(HISTORY_MIN_HEIGHT)
-            .min(max_usable_height);
-
-        if target_height > current_size.y + 1.0 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
-                current_size.x.max(BASE_MIN_WIDTH),
-                target_height,
-            )));
-        }
-    }
+    }));
 }
 
 fn trim_for_preview(text: &str, max_chars: usize) -> String {
