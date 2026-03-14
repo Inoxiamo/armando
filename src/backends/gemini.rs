@@ -1,0 +1,45 @@
+use crate::config::Config;
+use anyhow::{anyhow, Result};
+use serde_json::json;
+
+pub async fn query(prompt: &str, config: &Config) -> Result<String> {
+    let (api_key, model) = if let Some(ref c) = config.gemini {
+        (c.api_key.clone(), c.model.clone())
+    } else {
+        return Err(anyhow!(
+            "⚠️ Gemini config section not found in config.yaml."
+        ));
+    };
+
+    if api_key.is_empty() || api_key == "YOUR_GEMINI_API_KEY" {
+        return Err(anyhow!(
+            "⚠️ Gemini API key not configured. Edit config.yaml and set gemini.api_key."
+        ));
+    }
+
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
+    );
+
+    let payload = json!({
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    });
+
+    let client = reqwest::Client::new();
+    let response = client.post(&url).json(&payload).send().await?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow!("Gemini API error: {}", text));
+    }
+
+    let result: serde_json::Value = response.json().await?;
+    let content = result["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Unexpected Gemini API response structure"))?;
+
+    Ok(content.to_string())
+}

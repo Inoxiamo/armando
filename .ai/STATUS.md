@@ -1,0 +1,42 @@
+# Current Status
+
+## Implemented
+
+- Popup AI desktop richiamabile da hotkey
+- Supporto a backend `ollama`, `chatgpt`, `gemini`
+- Configurazione YAML centralizzata
+- Lettura automatica del testo selezionato
+- Alias per prompt contestuali
+- Copia risposta negli appunti
+- Shortcut `Ctrl+Enter` per apply/copy-and-close
+- Sistema di temi configurabile
+- Tema di default `NERV HUD`
+- History locale persistente con retention a 7 giorni
+- Filtri history per backend e testo
+- Riutilizzo e copia rapida delle entry dalla history
+- Finestra ridimensionabile con decorazioni native
+
+## Current Behavior Notes
+
+- `Ctrl+Enter` esegue auto-apply se il sistema dispone delle utility richieste
+- Se l'iniezione tastiera non e disponibile, la risposta viene comunque copiata e la UI informa l'utente
+- Il tema viene applicato da `config.yaml` all'apertura della UI
+- La history viene ricaricata all'apertura del pannello e dopo ogni risposta completata con successo
+- La lista history usa un'area scroll dedicata separata dallo scroll del resto della finestra
+- Le azioni principali sono etichettate in modo esplicito per evitare pulsanti ambigui
+
+## Known Gaps
+
+- Nessuna GUI per modificare la configurazione
+- Nessun supporto a streaming token-by-token
+- Nessuna diagnostica visuale per dipendenze OS mancanti prima del tentativo di apply
+- Nessuna distinzione tra history di sessione singola e history persistente
+- Mancano test automatici UI per layout, scroll e interazioni del popup
+
+## Immediate Priorities
+
+- Rendere l'auto-apply ancora piu osservabile e affidabile
+- Consolidare la nuova UI history con feedback piu ricchi e metadati migliori
+- Migliorare ulteriormente l'identita visiva `NERV HUD`
+- Definire un setup UX piu chiaro per Wayland/X11
+- Consolidare la documentazione per installazione e troubleshooting
