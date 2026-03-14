@@ -33,6 +33,7 @@
 - Il testo sui pulsanti accentati e configurabile via `accent_text_color` nel file tema
 - Il comportamento di default dell'assistente privilegia output testuali pronti da riapplicare subito
 - In modalita `Generic question`, il prompt viene trattato come domanda diretta e non come testo da formattare
+- In modalita `Generic question`, il tag `CMD` richiede solo il comando finale; senza `CMD`, la risposta viene formattata in Markdown
 
 ## Known Gaps
 

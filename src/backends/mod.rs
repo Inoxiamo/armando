@@ -55,6 +55,19 @@ fn prepare_prompt(prompt: &str, config: &Config, mode: PromptMode) -> String {
         ],
     };
 
+    if mode == PromptMode::GenericQuestion {
+        if detected_tags.iter().any(|tag| tag == "CMD") {
+            instructions.push(
+                "Se la risposta richiesta e un comando o una one-liner da terminale, restituisci solo il comando finale, senza markdown, senza backtick e senza testo aggiuntivo."
+                    .to_string(),
+            );
+        } else {
+            instructions.push(
+                "Formatta la risposta in Markdown chiaro e leggibile quando utile.".to_string(),
+            );
+        }
+    }
+
     if !detected_tags.is_empty() {
         instructions.push(format!(
             "Applica automaticamente queste istruzioni di contesto: {}.",
@@ -134,7 +147,7 @@ fn parse_header_tags(header: &str, aliases: Option<&HashMap<String, String>>) ->
             || aliases.is_some_and(|map| map.contains_key(tag))
             || matches!(
                 tag.as_str(),
-                "EMAIL" | "MAIL" | "WORK" | "FORMAL" | "CASUAL" | "SHORT" | "LONG"
+                "EMAIL" | "MAIL" | "WORK" | "FORMAL" | "CASUAL" | "SHORT" | "LONG" | "CMD"
             )
     });
 
@@ -163,6 +176,7 @@ fn built_in_tag_instruction(tag: &str) -> Option<&'static str> {
         "WORK" => Some("Mantieni un contesto professionale e orientato al lavoro."),
         "SHORT" => Some("Mantieni il risultato breve e sintetico."),
         "LONG" => Some("Puoi essere piu completo, ma resta diretto."),
+        "CMD" => Some("La risposta finale deve essere orientata a un comando eseguibile."),
         _ => None,
     }
 }

@@ -126,6 +126,7 @@ You can also prepend routing/tone tags before `:` and combine them freely:
 GMAIL ENG: scrivi una mail per spostare la riunione a domani
 SLACK ITA SHORT: avvisa il team che il deploy e finito
 WHATSAPP ENG CASUAL: chiedi se ci vediamo alle 18
+CMD: dammi il comando per vedere i file nascosti in una cartella
 ```
 
 Supported built-in tags include:
@@ -139,6 +140,9 @@ Supported built-in tags include:
 - `WORK`
 - `SHORT`
 - `LONG`
+- `CMD`
+
+In `Generic question mode`, se usi `CMD:` la risposta prova a restituire solo il comando finale. Se non usi `CMD`, la risposta generica viene formattata in Markdown.
 
 Custom aliases defined in `config.yaml` are still supported and can be combined with the built-in tags.
 
