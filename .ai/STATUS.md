@@ -13,6 +13,7 @@
 - Temi caricati da file YAML esterni
 - Tema di default `NERV HUD`
 - Compatibilita mantenuta con i nomi tema storici `nerv-magi-system` e `magi`
+- Preprompt orientato principalmente a pulizia, ottimizzazione, traduzione e adattamento del testo
 - History locale persistente con retention a 7 giorni
 - Filtri history per backend e testo
 - Riutilizzo e copia rapida delle entry dalla history
@@ -29,6 +30,7 @@
 - L'espansione della history e limitata alla dimensione utile del monitor per evitare stretch eccessivi
 - Le azioni principali sono etichettate in modo esplicito per evitare pulsanti ambigui
 - Il testo sui pulsanti accentati e configurabile via `accent_text_color` nel file tema
+- Il comportamento di default dell'assistente privilegia output testuali pronti da riapplicare subito
 
 ## Known Gaps
 

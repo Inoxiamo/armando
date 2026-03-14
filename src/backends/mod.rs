@@ -32,10 +32,14 @@ pub async fn query(backend: &str, prompt: &str, config: &Config) -> String {
 fn prepare_prompt(prompt: &str, config: &Config) -> String {
     let (expanded_prompt, detected_tags) = expand_tags(prompt, config.aliases.as_ref());
     let mut instructions = vec![
+        "Agisci principalmente come assistente di pulizia, ottimizzazione, correzione, traduzione e adattamento del testo.".to_string(),
+        "Tratta l'input dell'utente come testo da sistemare, migliorare, tradurre, accorciare, espandere o rendere piu adatto a un contesto specifico, salvo istruzioni diverse esplicite.".to_string(),
+        "Produci una versione finale pronta da copiare e applicare direttamente nell'applicazione di destinazione.".to_string(),
+        "Mantieni il senso originale del testo, migliorandone chiarezza, tono, grammatica, sintassi e leggibilita.".to_string(),
+        "Se la richiesta implica impostazioni di stile o formato, applicale direttamente nel testo finale senza spiegare cosa hai fatto.".to_string(),
         "Rispondi solo con il contenuto finale richiesto.".to_string(),
         "Niente introduzioni, commenti, spiegazioni, premesse o chiusure.".to_string(),
-        "Non usare virgolette o formattazione speciale, a meno che siano richieste esplicitamente."
-            .to_string(),
+        "Non usare virgolette o formattazione speciale, a meno che siano richieste esplicitamente.".to_string(),
     ];
 
     if !detected_tags.is_empty() {

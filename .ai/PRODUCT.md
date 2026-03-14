@@ -7,6 +7,7 @@
 ## Product Goal
 
 Ridurre al minimo il contesto operativo necessario per usare un modello AI durante attivita quotidiane come scrittura, riscrittura, traduzione, debugging e quick assistance.
+Il focus primario del prodotto e aiutare a ripulire, ottimizzare, tradurre e adattare testo gia scritto o da rifinire, in modo che sia subito riutilizzabile.
 
 ## Core Value Proposition
 
