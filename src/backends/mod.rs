@@ -180,3 +180,95 @@ fn built_in_tag_instruction(tag: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, ThemeConfig};
+
+    fn test_config() -> Config {
+        Config {
+            hotkey: "<ctrl>+<space>".to_string(),
+            aliases: Some(HashMap::from([(
+                "TITLE".to_string(),
+                "Trasforma il testo in un titolo breve.".to_string(),
+            )])),
+            auto_read_selection: true,
+            paste_response_shortcut: "<ctrl>+<enter>".to_string(),
+            default_backend: "ollama".to_string(),
+            theme: ThemeConfig::default(),
+            gemini: None,
+            chatgpt: None,
+            ollama: None,
+            loaded_from: None,
+        }
+    }
+
+    #[test]
+    fn text_assist_prompt_keeps_cleanup_instructions() {
+        let prompt = prepare_prompt(
+            "sistema questo testo",
+            &test_config(),
+            PromptMode::TextAssist,
+        );
+
+        assert!(prompt.contains("Agisci principalmente come assistente di pulizia"));
+        assert!(prompt.contains("Richiesta utente:\nsistema questo testo"));
+        assert!(!prompt.contains("Formatta la risposta in Markdown"));
+    }
+
+    #[test]
+    fn generic_question_uses_markdown_by_default() {
+        let prompt = prepare_prompt(
+            "come funziona docker compose?",
+            &test_config(),
+            PromptMode::GenericQuestion,
+        );
+
+        assert!(
+            prompt.contains("Tratta il testo dell'utente come una domanda o richiesta generica")
+        );
+        assert!(prompt.contains("Formatta la risposta in Markdown chiaro e leggibile"));
+        assert!(!prompt.contains("solo il comando finale"));
+    }
+
+    #[test]
+    fn generic_question_with_cmd_returns_command_only_instruction() {
+        let prompt = prepare_prompt(
+            "CMD: dammi il comando per vedere i processi",
+            &test_config(),
+            PromptMode::GenericQuestion,
+        );
+
+        assert!(prompt.contains("solo il comando finale"));
+        assert!(!prompt.contains("Formatta la risposta in Markdown chiaro e leggibile"));
+        assert!(prompt.contains("Applica automaticamente queste istruzioni di contesto: CMD."));
+    }
+
+    #[test]
+    fn expand_tags_applies_builtin_and_custom_aliases() {
+        let (expanded, tags) =
+            expand_tags("CMD TITLE: hello world", test_config().aliases.as_ref());
+
+        assert_eq!(tags, vec!["CMD".to_string(), "TITLE".to_string()]);
+        assert!(
+            expanded.contains("La risposta finale deve essere orientata a un comando eseguibile.")
+        );
+        assert!(expanded.contains("Trasforma il testo in un titolo breve."));
+        assert!(expanded.ends_with("hello world"));
+    }
+
+    #[test]
+    fn unknown_tags_disable_header_expansion() {
+        let (expanded, tags) = expand_tags("NOPE: hello world", test_config().aliases.as_ref());
+
+        assert!(tags.is_empty());
+        assert_eq!(expanded, "NOPE: hello world");
+    }
+
+    #[test]
+    fn parse_header_tags_accepts_cmd() {
+        let tags = parse_header_tags("CMD SHORT", test_config().aliases.as_ref());
+        assert_eq!(tags, vec!["CMD".to_string(), "SHORT".to_string()]);
+    }
+}

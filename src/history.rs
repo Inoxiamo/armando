@@ -107,3 +107,57 @@ fn prune_old_entries(entries: &mut Vec<HistoryEntry>) {
             .unwrap_or(false)
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry_at(offset_days: i64, label: &str) -> HistoryEntry {
+        HistoryEntry {
+            created_at: (OffsetDateTime::now_utc() - Duration::days(offset_days))
+                .format(&Rfc3339)
+                .unwrap(),
+            backend: "ollama".to_string(),
+            prompt: format!("prompt-{label}"),
+            response: format!("response-{label}"),
+        }
+    }
+
+    #[test]
+    fn prune_old_entries_keeps_recent_entries() {
+        let mut entries = vec![entry_at(1, "recent"), entry_at(RETENTION_DAYS - 1, "edge")];
+
+        prune_old_entries(&mut entries);
+
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn prune_old_entries_removes_expired_and_invalid_entries() {
+        let mut entries = vec![
+            entry_at(1, "recent"),
+            entry_at(RETENTION_DAYS + 1, "old"),
+            HistoryEntry {
+                created_at: "not-a-date".to_string(),
+                backend: "ollama".to_string(),
+                prompt: "bad".to_string(),
+                response: "bad".to_string(),
+            },
+        ];
+
+        prune_old_entries(&mut entries);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].prompt, "prompt-recent");
+    }
+
+    #[test]
+    fn new_entry_preserves_payload() {
+        let entry = new_entry("gemini", "prompt", "response").unwrap();
+
+        assert_eq!(entry.backend, "gemini");
+        assert_eq!(entry.prompt, "prompt");
+        assert_eq!(entry.response, "response");
+        assert!(!entry.created_at.is_empty());
+    }
+}
