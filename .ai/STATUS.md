@@ -26,7 +26,9 @@
 - La history viene ricaricata all'apertura del pannello e dopo ogni risposta completata con successo
 - La lista history usa un'area scroll dedicata separata dallo scroll del resto della finestra
 - L'apertura della history espande nativamente la finestra verso il basso per evitare che il pannello resti nascosto
+- L'espansione della history e limitata alla dimensione utile del monitor per evitare stretch eccessivi
 - Le azioni principali sono etichettate in modo esplicito per evitare pulsanti ambigui
+- Il testo sui pulsanti accentati e configurabile via `accent_text_color` nel file tema
 
 ## Known Gaps
 

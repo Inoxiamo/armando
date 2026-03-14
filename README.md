@@ -144,6 +144,8 @@ Custom aliases defined in `config.yaml` are still supported and can be combined 
 
 The popup theme is selected from `config.yaml`, but the full color palette now lives in external YAML files under `themes/`. The app currently ships with `default-dark`, `nerv-hud`, `nerv-magi-system` and `magi`, and you can also point `theme.path` to a custom theme file.
 
+Each theme file can define colors such as `window_fill`, `panel_fill`, `accent_color`, `accent_hover_color`, `accent_text_color`, `text_color`, `weak_text_color`, `border_color` and `danger_color`.
+
 `nerv-hud` is the default visual preset.
 
 ---

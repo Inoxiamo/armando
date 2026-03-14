@@ -55,6 +55,20 @@ Campi attuali:
 - `name`
 - `path`
 
+Campi principali del file tema:
+
+- `window_fill`
+- `panel_fill`
+- `panel_fill_soft`
+- `panel_fill_raised`
+- `accent_color`
+- `accent_hover_color`
+- `accent_text_color`
+- `text_color`
+- `weak_text_color`
+- `border_color`
+- `danger_color`
+
 Preset attuali:
 
 - `default-dark`

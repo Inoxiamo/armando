@@ -365,7 +365,7 @@ impl eframe::App for AiPopupApp {
                                 "Send Prompt",
                                 self.theme.accent_color,
                                 self.theme.border_color,
-                                egui::Color32::BLACK,
+                                self.theme.accent_text_color,
                             );
                             let copy_button = secondary_action_button(
                                 "Copy Response",
@@ -655,7 +655,7 @@ fn history_entry_card(
                 "Reuse Entry",
                 theme.accent_color,
                 theme.border_color,
-                egui::Color32::BLACK,
+                theme.accent_text_color,
             );
             if ui.add(reuse_button).clicked() {
                 *prompt = entry.prompt.clone();
@@ -672,14 +672,18 @@ fn history_entry_card(
 fn sync_history_viewport(ctx: &egui::Context, show_history: bool) {
     const BASE_MIN_WIDTH: f32 = 520.0;
     const BASE_MIN_HEIGHT: f32 = 360.0;
-    const HISTORY_MIN_HEIGHT: f32 = 760.0;
-    const HISTORY_TARGET_HEIGHT: f32 = 860.0;
+    const HISTORY_MIN_HEIGHT: f32 = 620.0;
+    const HISTORY_GROWTH_DELTA: f32 = 220.0;
+    const SCREEN_PADDING: f32 = 80.0;
 
-    let current_size = ctx.input(|i| {
-        i.viewport()
-            .inner_rect
-            .map(|rect| rect.size())
-            .unwrap_or(egui::vec2(640.0, 480.0))
+    let (current_size, monitor_size) = ctx.input(|i| {
+        (
+            i.viewport()
+                .inner_rect
+                .map(|rect| rect.size())
+                .unwrap_or(egui::vec2(640.0, 480.0)),
+            i.viewport().monitor_size,
+        )
     });
 
     let min_size = if show_history {
@@ -690,11 +694,19 @@ fn sync_history_viewport(ctx: &egui::Context, show_history: bool) {
     ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min_size));
 
     if show_history {
-        let new_height = current_size.y.max(HISTORY_TARGET_HEIGHT);
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
-            current_size.x.max(BASE_MIN_WIDTH),
-            new_height,
-        )));
+        let max_usable_height = monitor_size
+            .map(|size| (size.y - SCREEN_PADDING).max(HISTORY_MIN_HEIGHT))
+            .unwrap_or(HISTORY_MIN_HEIGHT + HISTORY_GROWTH_DELTA);
+        let target_height = (current_size.y + HISTORY_GROWTH_DELTA)
+            .max(HISTORY_MIN_HEIGHT)
+            .min(max_usable_height);
+
+        if target_height > current_size.y + 1.0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                current_size.x.max(BASE_MIN_WIDTH),
+                target_height,
+            )));
+        }
     }
 }
 
@@ -910,10 +922,10 @@ fn build_style(theme: &ResolvedTheme) -> egui::Style {
     visuals.widgets.inactive.fg_stroke.color = theme.text_color;
     visuals.widgets.hovered.bg_fill = theme.accent_hover_color;
     visuals.widgets.hovered.bg_stroke.color = theme.border_color;
-    visuals.widgets.hovered.fg_stroke.color = egui::Color32::BLACK;
+    visuals.widgets.hovered.fg_stroke.color = theme.accent_text_color;
     visuals.widgets.active.bg_fill = theme.accent_color;
     visuals.widgets.active.bg_stroke.color = theme.border_color;
-    visuals.widgets.active.fg_stroke.color = egui::Color32::BLACK;
+    visuals.widgets.active.fg_stroke.color = theme.accent_text_color;
     visuals.widgets.open = visuals.widgets.active;
 
     style.visuals = visuals;
