@@ -1,6 +1,7 @@
 use eframe::egui;
 use egui::text::{CCursor, CCursorRange};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::runtime::Runtime;
 
 use crate::backends;
@@ -32,6 +33,7 @@ pub struct AiPopupApp {
     history_filter_backend: String,
     history_filter_query: String,
     history_action_error: Option<String>,
+    pending_history_viewport_sync: Option<bool>,
 
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
@@ -80,6 +82,7 @@ impl AiPopupApp {
             history_filter_backend: "all".to_string(),
             history_filter_query: String::new(),
             history_action_error: None,
+            pending_history_viewport_sync: None,
             async_response: Arc::new(Mutex::new(None)),
         }
     }
@@ -182,13 +185,19 @@ impl AiPopupApp {
         if self.show_history {
             self.reload_history();
         }
-        sync_history_viewport(ctx, self.show_history);
+        self.pending_history_viewport_sync = Some(self.show_history);
         ctx.request_repaint();
+        ctx.request_repaint_after(Duration::from_millis(16));
     }
 }
 
 impl eframe::App for AiPopupApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(show_history) = self.pending_history_viewport_sync.take() {
+            sync_history_viewport(ctx, show_history);
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+
         self.check_async_response(ctx);
 
         // Handle global Esc to close
@@ -660,9 +669,13 @@ fn history_entry_card(
                 *prompt = entry.prompt.clone();
                 *response = entry.response.clone();
                 *show_history = false;
-                sync_history_viewport(ctx, false);
+                ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+                    520.0, 360.0,
+                )));
                 *prompt_focus_initialized = false;
                 *history_action_error = None;
+                ctx.request_repaint();
+                ctx.request_repaint_after(Duration::from_millis(16));
             }
         });
     });
