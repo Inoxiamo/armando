@@ -57,6 +57,7 @@
 - Opening the settings panel now expands the viewport width when needed so the main prompt/response preview does not get squeezed into a broken narrow layout
 - Prompt actions are grouped directly in the prompt header, while copy/history controls are grouped in the response header for a shorter interaction path
 - Toolbar actions now use embedded SVG icons for the main controls so they stay visible and more polished without relying on emoji or font fallback
+- Pasting into the prompt with `Ctrl+V` or `Cmd+V` now also auto-attaches an image when the clipboard contains one, while normal text paste continues to work as usual
 - History reloads when enabled, when the panel is opened, and after every successful response
 - The history list uses its own scroll region, separate from the rest of the UI
 - Opening history expands the window downward through native viewport sizing so the panel remains visible

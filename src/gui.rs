@@ -676,6 +676,12 @@ impl AiPopupApp {
     }
 
     fn attach_image_from_clipboard(&mut self) {
+        if let Err(err) = self.try_attach_image_from_clipboard(true) {
+            self.attachment_error = Some(err);
+        }
+    }
+
+    fn try_attach_image_from_clipboard(&mut self, report_errors: bool) -> Result<bool, String> {
         match load_image_attachment_from_clipboard() {
             Ok(image) => {
                 self.attachments.push(image);
@@ -684,9 +690,14 @@ impl AiPopupApp {
                     &[("count", self.attachments.len().to_string())],
                 ));
                 self.attachment_error = None;
+                Ok(true)
             }
             Err(err) => {
-                self.attachment_error = Some(err);
+                if report_errors {
+                    Err(err)
+                } else {
+                    Ok(false)
+                }
             }
         }
     }
@@ -1056,6 +1067,17 @@ impl eframe::App for AiPopupApp {
                         }) {
                             self.auto_copy_close_after_response = true;
                             self.submit_prompt(ctx);
+                        }
+
+                        if input_resp.has_focus()
+                            && ctx.input(|i| {
+                                i.key_pressed(egui::Key::V)
+                                    && (i.modifiers.ctrl || i.modifiers.command)
+                                    && !i.modifiers.shift
+                                    && !i.modifiers.alt
+                            })
+                        {
+                            let _ = self.try_attach_image_from_clipboard(false);
                         }
 
                         if !self.attachments.is_empty() {
