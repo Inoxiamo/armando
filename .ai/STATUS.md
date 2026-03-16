@@ -27,6 +27,7 @@
 - Provider settings show a residual-credit indicator, with `∞` for Ollama and `n/d` for cloud providers that do not expose reliable balance data here
 - Main prompt and response actions now live in compact toolbars near their respective editors instead of large text buttons below the prompt
 - Prompt and response editors can now be resized directly with the mouse by dragging their lower edge
+- Provider configuration sections are closed by default in settings, including the Ollama URL/model section
 - Image attachments from file picker
 - Screenshot/image paste from clipboard
 - Voice dictation flow with microphone recording and OpenAI transcription
@@ -51,6 +52,7 @@
 - Debug logging can be enabled from config or UI and writes local request/error events only when explicitly turned on
 - Each provider model field remains editable by hand, but clicking it can also load a provider-specific list of available models and expose it as a dropdown picker
 - Ollama shows infinite local availability, while cloud backends currently surface `n/d` because this app cannot read a dependable remaining-credit balance from those providers
+- The Ollama base URL remains editable in settings and changing it invalidates the cached model list so the next refresh reads from the new server
 - Prompt actions are grouped directly in the prompt header, while copy/history controls are grouped in the response header for a shorter interaction path
 - Toolbar actions now prefer short text badges over emoji-style glyphs to avoid broken icons on systems with limited font fallback
 - History reloads when enabled, when the panel is opened, and after every successful response
@@ -60,6 +62,7 @@
 - Primary actions use explicit labels to avoid ambiguous buttons
 - Text on accent buttons is configurable through `accent_text_color` in the theme file
 - Local installation places the binary, shipped themes, shipped locales, desktop icon, and `.desktop` launcher entry in the user profile
+- Downloaded GitHub release bundles now include bundled assets, install scripts, and checksums so other users can extract and install them directly
 - Default assistant behavior prefers output that can be reapplied immediately
 - In `Generic question` mode, the prompt is treated as a direct question rather than text to rewrite
 - In `Generic question` mode, the `CMD` tag requests only the final command; without `CMD`, the answer is formatted as Markdown
@@ -81,8 +84,8 @@
 
 ## Immediate Priorities
 
-- Consolidate the new settings/history UI with richer feedback and better metadata
-- Continue refining the `NERV HUD` visual identity
-- Add diagnostics and health checks for backend/config issues
-- Finish packaging, release notes, and cross-platform stabilization work
+- Finalize cross-platform release notes and install guidance for tagged GitHub releases
+- Add clearer diagnostics for backend health, missing tools, and first-run setup
+- Continue refining the compact toolbar language and the `NERV HUD` visual pass
+- Separate session-only context from persisted history more explicitly
 - Evaluate a beta tools mode for terminal/CLI/MCP behind explicit confirmation

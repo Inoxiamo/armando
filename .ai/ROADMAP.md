@@ -14,7 +14,7 @@
 - [ ] Early diagnostics for runtime environment and configured backends
 - [ ] Clearer status messages for backend state, config persistence, and failure recovery
 - [ ] Guided first-run setup and central directory verification
-- [ ] Documented manual test flows for core user journeys
+- [x] Documented manual release packaging and install flow for downloadable bundles
 
 ## Milestone 0.3 - UX and Identity
 
@@ -35,7 +35,7 @@
 
 - [ ] Session-only history distinct from persistent history
 - [ ] Prompt/snippet templates
-- [ ] Optional conversational memory
+- [x] Optional conversational memory
 - [ ] Active-window context as a hint
 - [ ] Multiple config profiles such as `work`, `personal`, and `beta`
 
@@ -51,6 +51,8 @@
 
 - [x] Simplified local installation for Linux, macOS, and Windows
 - [x] Release packaging
+- [x] Downloadable release bundles with packaged assets and install scripts
+- [x] Release checksums for published artifacts
 - [x] Graphical configuration editor
 - [x] Bundled desktop assets included in local install and release packaging
 - [ ] Cross-platform stabilization

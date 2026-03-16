@@ -11,7 +11,6 @@ Project documentation is centralized in [.ai/README.md](/home/simone/work/test-p
 - Architecture: [.ai/ARCHITECTURE.md](/home/simone/work/test-popup-ai/.ai/ARCHITECTURE.md)
 - Current status: [.ai/STATUS.md](/home/simone/work/test-popup-ai/.ai/STATUS.md)
 - Roadmap: [.ai/ROADMAP.md](/home/simone/work/test-popup-ai/.ai/ROADMAP.md)
-- Rust orientation guide: [.ai/RUST_GUIDE_FOR_JAVA_PYTHON.md](/home/simone/work/test-popup-ai/.ai/RUST_GUIDE_FOR_JAVA_PYTHON.md)
 
 ## Quick Start
 
@@ -32,6 +31,31 @@ Install the release binary, default config, themes, and locales locally:
 ```bash
 ./scripts/install-local.sh
 ```
+
+## Downloaded Release Bundles
+
+GitHub Releases bundles now ship with:
+
+- the compiled binary
+- default config
+- bundled themes
+- bundled locales
+- desktop assets
+- a ready-to-run install script
+
+On Linux and macOS, extract the archive and run:
+
+```bash
+./scripts/install.sh
+```
+
+On Windows, extract the archive and run:
+
+```powershell
+.\scripts\install.ps1
+```
+
+Each published archive also includes a `.sha256` checksum file.
 
 ## Configuration Layout
 
@@ -60,4 +84,4 @@ The ChatGPT backend uses OpenAI's Responses API.
 
 ## Release Pipeline
 
-The repository includes [release.yml](/home/simone/work/test-popup-ai/.github/workflows/release.yml), which builds release artifacts for Linux, macOS, and Windows, bundles the shipped assets, and publishes release assets when a tag such as `v1.0.0` is pushed.
+The repository includes [release.yml](/home/simone/work/test-popup-ai/.github/workflows/release.yml), which builds release artifacts for Linux, macOS, and Windows, bundles the shipped assets, generates checksums, and publishes release assets when a tag such as `v1.0.0` is pushed.

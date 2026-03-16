@@ -9,7 +9,6 @@ Use it as the default entry point for onboarding, maintenance, planning, and rel
 - `ARCHITECTURE.md`: technical overview, main components, and runtime flows
 - `STATUS.md`: current behavior, implemented capabilities, known gaps, and immediate priorities
 - `ROADMAP.md`: milestone-based roadmap focused on product maturity and distribution
-- `RUST_GUIDE_FOR_JAVA_PYTHON.md`: quick orientation guide for reading this Rust codebase if you come from Java or Python
 
 ## Repository Structure
 
@@ -33,6 +32,7 @@ Use it as the default entry point for onboarding, maintenance, planning, and rel
 - Read `.ai/STATUS.md` before making code changes
 - Keep code and `.ai` documentation aligned after every UX or functional change
 - Do not commit secrets or local-only configuration files
+- Ignore local-only notes and guides under `.ai/` when they are intentionally excluded from Git
 - Use Conventional Commits such as `feat: improve history panel`
 - Prefer small, coherent commits with verified scope
 - Run at least `cargo build` before closing changes that touch Rust code

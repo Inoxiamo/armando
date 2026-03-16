@@ -43,7 +43,10 @@
   Builds the release binary and installs the user-local binary, config, themes, locales, icon, and desktop entry.
 
 - `scripts/package-release.sh`
-  Produces distributable archives that bundle the binary together with shipped config, theme, locale, and asset files.
+  Produces distributable archives that bundle the binary together with shipped config, theme, locale, asset, and install-script files.
+
+- `scripts/release-install.sh` and `scripts/release-install.ps1`
+  Install a downloaded release bundle into the user profile without requiring the full repository checkout.
 
 - `assets/`
   Holds desktop-facing assets, currently the project icon and the Linux desktop entry.
@@ -64,9 +67,10 @@
 12. If local history is enabled, successful responses are appended to local history
 13. The response is rendered in the popup
 14. The user can change theme, language, backend, models, credentials, history, and debug settings from the settings panel with immediate persistence
-15. Provider sections can asynchronously load model lists from the configured backend and expose them in a dropdown under the editable model field
+15. Provider sections stay collapsed by default and can asynchronously load model lists from the configured backend, including the currently editable Ollama base URL
 16. The settings panel also surfaces a lightweight credit-availability indicator: `∞` for local Ollama usage and `n/d` for cloud providers whose remaining balance is not exposed through this integration
 17. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+18. Downloaded release bundles can be installed directly through the bundled platform-specific install scripts
 
 ## UI Structure
 

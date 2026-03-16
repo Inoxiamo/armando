@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional version label for manual builds"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -51,27 +56,48 @@ jobs:
         shell: bash
         run: |
           chmod +x scripts/package-release.sh
-          VERSION="${GITHUB_REF_NAME:-dev}"
+          VERSION="${{ github.event.inputs.version || github.ref_name || 'dev' }}"
           scripts/package-release.sh \
             "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" \
             "${{ matrix.target }}" \
             "${VERSION}"
 
+      - name: Create Unix checksum
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name || 'dev' }}"
+          FILE="target/dist/${{ env.APP_NAME }}-${VERSION}-${{ matrix.target }}.tar.gz"
+          sha256sum "${FILE}" > "${FILE}.sha256"
+
       - name: Package Windows bundle
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } elseif ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
           $bundle = "target/dist/${env:APP_NAME}-$version-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "$bundle/configs" | Out-Null
           New-Item -ItemType Directory -Force -Path "$bundle/themes" | Out-Null
           New-Item -ItemType Directory -Force -Path "$bundle/locales" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$bundle/assets" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$bundle/scripts" | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "$bundle/"
           Copy-Item "README.md" "$bundle/"
           Copy-Item "configs/default.yaml" "$bundle/configs/default.yaml"
           Copy-Item "themes/*.yaml" "$bundle/themes/"
           Copy-Item "locales/*.yaml" "$bundle/locales/"
+          Copy-Item "assets/*" "$bundle/assets/"
+          Copy-Item "scripts/release-install.ps1" "$bundle/scripts/install.ps1"
           Compress-Archive -Path "$bundle/*" -DestinationPath "$bundle.zip" -Force
+
+      - name: Create Windows checksum
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } elseif ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $file = "target/dist/$env:APP_NAME-$version-${{ matrix.target }}.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
+          Set-Content -Path "$file.sha256" -Value "$hash  $(Split-Path -Leaf $file)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -80,6 +106,8 @@ jobs:
           path: |
             target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.tar.gz
             target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.zip
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.tar.gz.sha256
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.zip.sha256
 
       - name: Publish release assets
         if: startsWith(github.ref, 'refs/tags/')
@@ -88,3 +116,5 @@ jobs:
           files: |
             target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.tar.gz
             target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.zip
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.tar.gz.sha256
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.zip.sha256

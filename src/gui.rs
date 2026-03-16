@@ -1805,7 +1805,7 @@ fn provider_settings_section(
 
     egui::CollapsingHeader::new(header)
         .id_source(id)
-        .default_open(provider == "chatgpt")
+        .default_open(false)
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(&health_check.detail)
