@@ -25,8 +25,8 @@
 - Optional debug logging for requests and errors, disabled by default and intended only for diagnostics
 - Provider settings can load the currently available models from the backend API or local Ollama server and let the user pick them from a dropdown
 - Provider settings show a residual-credit indicator, with `∞` for Ollama and `n/d` for cloud providers that do not expose reliable balance data here
-- Main prompt and response actions now live in compact icon toolbars near their respective editors instead of large text buttons below the prompt
-- Prompt and response editors can now be resized quickly from the UI through dedicated height controls
+- Main prompt and response actions now live in compact toolbars near their respective editors instead of large text buttons below the prompt
+- Prompt and response editors can now be resized directly with the mouse by dragging their lower edge
 - Image attachments from file picker
 - Screenshot/image paste from clipboard
 - Voice dictation flow with microphone recording and OpenAI transcription
@@ -52,6 +52,7 @@
 - Each provider model field remains editable by hand, but clicking it can also load a provider-specific list of available models and expose it as a dropdown picker
 - Ollama shows infinite local availability, while cloud backends currently surface `n/d` because this app cannot read a dependable remaining-credit balance from those providers
 - Prompt actions are grouped directly in the prompt header, while copy/history controls are grouped in the response header for a shorter interaction path
+- Toolbar actions now prefer short text badges over emoji-style glyphs to avoid broken icons on systems with limited font fallback
 - History reloads when enabled, when the panel is opened, and after every successful response
 - The history list uses its own scroll region, separate from the rest of the UI
 - Opening history expands the window downward through native viewport sizing so the panel remains visible

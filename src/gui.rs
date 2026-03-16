@@ -803,7 +803,7 @@ impl eframe::App for AiPopupApp {
                                     let send_clicked = ui
                                         .add_enabled(
                                             !self.is_loading,
-                                            icon_action_button("Go", self.theme.accent_color),
+                                            icon_action_button("Run", self.theme.accent_color),
                                         )
                                         .on_hover_text(self.tr("app.send"))
                                         .clicked();
@@ -814,7 +814,7 @@ impl eframe::App for AiPopupApp {
                                     if !self.attachments.is_empty()
                                         && ui
                                             .add(icon_action_button(
-                                                "X",
+                                                "Clr",
                                                 self.theme.panel_fill_soft,
                                             ))
                                             .on_hover_text(self.tr("app.clear_images"))
@@ -853,35 +853,11 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("Img", self.theme.panel_fill_soft))
+                                        .add(icon_action_button("Clip", self.theme.panel_fill_soft))
                                         .on_hover_text(self.tr("app.attach_image"))
                                         .clicked()
                                     {
                                         self.attach_image_from_file();
-                                    }
-
-                                    if ui
-                                        .add(icon_action_button("+", self.theme.panel_fill_soft))
-                                        .on_hover_text(self.tr_with(
-                                            "app.editor_grow",
-                                            &[("section", prompt_section_label.clone())],
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.prompt_editor_height =
-                                            (self.prompt_editor_height + 60.0).clamp(160.0, 720.0);
-                                    }
-
-                                    if ui
-                                        .add(icon_action_button("-", self.theme.panel_fill_soft))
-                                        .on_hover_text(self.tr_with(
-                                            "app.editor_shrink",
-                                            &[("section", prompt_section_label.clone())],
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.prompt_editor_height =
-                                            (self.prompt_editor_height - 60.0).clamp(160.0, 720.0);
                                     }
                                 },
                             );
@@ -902,6 +878,13 @@ impl eframe::App for AiPopupApp {
                         });
                         let input_output = input_output.inner;
                         let input_resp = &input_output.response;
+                        editor_resize_handle(
+                            ui,
+                            &self.theme,
+                            &mut self.prompt_editor_height,
+                            160.0,
+                            720.0,
+                        );
 
                         if !self.prompt_focus_initialized {
                             input_resp.request_focus();
@@ -1071,32 +1054,6 @@ impl eframe::App for AiPopupApp {
                                             let _ = clipboard.set_text(self.response.clone());
                                         }
                                     }
-
-                                    if ui
-                                        .add(icon_action_button("+", self.theme.panel_fill_soft))
-                                        .on_hover_text(self.tr_with(
-                                            "app.editor_grow",
-                                            &[("section", response_section_label.clone())],
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.response_editor_height = (self.response_editor_height
-                                            + 60.0)
-                                            .clamp(140.0, 720.0);
-                                    }
-
-                                    if ui
-                                        .add(icon_action_button("-", self.theme.panel_fill_soft))
-                                        .on_hover_text(self.tr_with(
-                                            "app.editor_shrink",
-                                            &[("section", response_section_label.clone())],
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.response_editor_height = (self.response_editor_height
-                                            - 60.0)
-                                            .clamp(140.0, 720.0);
-                                    }
                                 },
                             );
                         });
@@ -1113,6 +1070,13 @@ impl eframe::App for AiPopupApp {
                                     .font(egui::TextStyle::Monospace),
                             );
                         });
+                        editor_resize_handle(
+                            ui,
+                            &self.theme,
+                            &mut self.response_editor_height,
+                            140.0,
+                            720.0,
+                        );
 
                         if self.show_history {
                             ui.add_space(14.0);
@@ -1423,6 +1387,40 @@ fn icon_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::Button<'
         .stroke(egui::Stroke::NONE)
         .rounding(egui::Rounding::same(10.0))
         .min_size(egui::vec2(width, 34.0))
+}
+
+fn editor_resize_handle(
+    ui: &mut egui::Ui,
+    theme: &ResolvedTheme,
+    height: &mut f32,
+    min_height: f32,
+    max_height: f32,
+) {
+    let handle_height = 14.0;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), handle_height),
+        egui::Sense::click_and_drag(),
+    );
+    let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+
+    if response.dragged() {
+        *height = (*height + ui.ctx().input(|i| i.pointer.delta().y)).clamp(min_height, max_height);
+        ui.ctx().request_repaint();
+    }
+
+    let stroke_color = if response.hovered() || response.dragged() {
+        theme.accent_color.gamma_multiply(0.75)
+    } else {
+        theme.border_color.gamma_multiply(0.35)
+    };
+    let center_y = rect.center().y;
+    let line_width = 44.0;
+    let line_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, center_y),
+        egui::vec2(line_width, 3.0),
+    );
+    ui.painter()
+        .rect_filled(line_rect, egui::Rounding::same(999.0), stroke_color);
 }
 
 fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -> egui::Frame {

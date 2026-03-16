@@ -71,7 +71,7 @@
 ## UI Structure
 
 - Main popup area:
-  backend selector, settings access, generic mode toggle, prompt editor, compact icon toolbars for prompt/response actions, resizable prompt/response areas, and response area
+  backend selector, settings access, generic mode toggle, prompt editor, compact text-badge toolbars for prompt/response actions, mouse-resizable prompt/response areas, and response area
 - Settings side panel:
   language/theme/backend selectors, history/debug toggles, model/key sections, provider model dropdowns, credit indicators, and persistence feedback
 - History panel:
