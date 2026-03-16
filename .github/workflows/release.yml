@@ -86,7 +86,7 @@ jobs:
           Copy-Item "configs/default.yaml" "$bundle/configs/default.yaml"
           Copy-Item "themes/*.yaml" "$bundle/themes/"
           Copy-Item "locales/*.yaml" "$bundle/locales/"
-          Copy-Item "assets/*" "$bundle/assets/"
+          Copy-Item "assets/*" "$bundle/assets/" -Recurse
           Copy-Item "scripts/release-install.ps1" "$bundle/scripts/install.ps1"
           Compress-Archive -Path "$bundle/*" -DestinationPath "$bundle.zip" -Force
 

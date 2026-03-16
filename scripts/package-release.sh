@@ -24,7 +24,7 @@ cp "${ROOT_DIR}/README.md" "${DIST_DIR}/"
 cp "${ROOT_DIR}/configs/default.yaml" "${DIST_DIR}/configs/default.yaml"
 cp "${ROOT_DIR}"/themes/*.yaml "${DIST_DIR}/themes/"
 cp "${ROOT_DIR}"/locales/*.yaml "${DIST_DIR}/locales/"
-cp "${ROOT_DIR}"/assets/* "${DIST_DIR}/assets/"
+cp -R "${ROOT_DIR}/assets/." "${DIST_DIR}/assets/"
 cp "${ROOT_DIR}/scripts/release-install.sh" "${DIST_DIR}/scripts/install.sh"
 chmod 0755 "${DIST_DIR}/scripts/install.sh"
 

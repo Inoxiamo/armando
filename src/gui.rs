@@ -30,6 +30,97 @@ fn display_version() -> String {
     format!("{major}.{minor}.{patch:02}")
 }
 
+fn load_toolbar_icon_textures(ctx: &egui::Context) -> HashMap<ToolbarIcon, egui::TextureHandle> {
+    let mut textures = HashMap::new();
+    for (icon, name, svg) in [
+        (
+            ToolbarIcon::Settings,
+            "toolbar_settings",
+            include_str!("../assets/icons/settings.svg"),
+        ),
+        (
+            ToolbarIcon::Send,
+            "toolbar_send",
+            include_str!("../assets/icons/send.svg"),
+        ),
+        (
+            ToolbarIcon::Clear,
+            "toolbar_clear",
+            include_str!("../assets/icons/close.svg"),
+        ),
+        (
+            ToolbarIcon::Mic,
+            "toolbar_mic",
+            include_str!("../assets/icons/mic.svg"),
+        ),
+        (
+            ToolbarIcon::Stop,
+            "toolbar_stop",
+            include_str!("../assets/icons/stop.svg"),
+        ),
+        (
+            ToolbarIcon::PasteImage,
+            "toolbar_paste_image",
+            include_str!("../assets/icons/paste-image.svg"),
+        ),
+        (
+            ToolbarIcon::AttachImage,
+            "toolbar_attach_image",
+            include_str!("../assets/icons/attach-image.svg"),
+        ),
+        (
+            ToolbarIcon::History,
+            "toolbar_history",
+            include_str!("../assets/icons/history.svg"),
+        ),
+        (
+            ToolbarIcon::HistoryOpen,
+            "toolbar_history_open",
+            include_str!("../assets/icons/history-open.svg"),
+        ),
+        (
+            ToolbarIcon::Copy,
+            "toolbar_copy",
+            include_str!("../assets/icons/copy.svg"),
+        ),
+        (
+            ToolbarIcon::Close,
+            "toolbar_close",
+            include_str!("../assets/icons/close.svg"),
+        ),
+    ] {
+        match render_svg_icon(svg) {
+            Ok(image) => {
+                let texture = ctx.load_texture(name, image, egui::TextureOptions::LINEAR);
+                textures.insert(icon, texture);
+            }
+            Err(err) => {
+                log::error!("Could not render toolbar icon `{name}`: {err}");
+            }
+        }
+    }
+    textures
+}
+
+fn render_svg_icon(svg: &str) -> Result<egui::ColorImage, String> {
+    let options = resvg::usvg::Options::default();
+    let tree =
+        resvg::usvg::Tree::from_str(svg, &options).map_err(|err| format!("Invalid SVG: {err}"))?;
+    let size = tree.size().to_int_size();
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
+        .ok_or_else(|| "Could not allocate pixmap for SVG icon.".to_string())?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::default(),
+        &mut pixmap.as_mut(),
+    );
+
+    Ok(egui::ColorImage::from_rgba_unmultiplied(
+        [size.width() as usize, size.height() as usize],
+        pixmap.data(),
+    ))
+}
+
 struct VoiceRecording {
     child: Child,
     path: PathBuf,
@@ -52,7 +143,7 @@ struct ProviderModelState {
     last_error: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum ToolbarIcon {
     Settings,
     Send,
@@ -105,6 +196,7 @@ pub struct AiPopupApp {
     available_locales: Vec<LocaleDefinition>,
     i18n: I18n,
     provider_model_states: HashMap<String, ProviderModelState>,
+    toolbar_icon_textures: HashMap<ToolbarIcon, egui::TextureHandle>,
 
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
@@ -183,6 +275,7 @@ impl AiPopupApp {
             available_locales: available_locales().unwrap_or_default(),
             i18n,
             provider_model_states: HashMap::new(),
+            toolbar_icon_textures: load_toolbar_icon_textures(&cc.egui_ctx),
             async_response: Arc::new(Mutex::new(None)),
             async_dictation: Arc::new(Mutex::new(None)),
             async_available_models: Arc::new(Mutex::new(Vec::new())),
@@ -806,6 +899,7 @@ impl eframe::App for AiPopupApp {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     let gear = icon_action_button(
+                                        self,
                                         ToolbarIcon::Settings,
                                         self.theme.panel_fill_soft,
                                         self.theme.text_color,
@@ -827,6 +921,7 @@ impl eframe::App for AiPopupApp {
                                         .add_enabled(
                                             !self.is_loading,
                                             icon_action_button(
+                                                self,
                                                 ToolbarIcon::Send,
                                                 self.theme.accent_color,
                                                 self.theme.accent_text_color,
@@ -841,6 +936,7 @@ impl eframe::App for AiPopupApp {
                                     if !self.attachments.is_empty()
                                         && ui
                                             .add(icon_action_button(
+                                                self,
                                                 ToolbarIcon::Clear,
                                                 self.theme.panel_fill_soft,
                                                 self.theme.text_color,
@@ -863,6 +959,7 @@ impl eframe::App for AiPopupApp {
                                     };
                                     if ui
                                         .add(icon_action_button(
+                                            self,
                                             voice_icon,
                                             self.theme.panel_fill_soft,
                                             self.theme.text_color,
@@ -875,6 +972,7 @@ impl eframe::App for AiPopupApp {
 
                                     if ui
                                         .add(icon_action_button(
+                                            self,
                                             ToolbarIcon::PasteImage,
                                             self.theme.panel_fill_soft,
                                             self.theme.text_color,
@@ -887,6 +985,7 @@ impl eframe::App for AiPopupApp {
 
                                     if ui
                                         .add(icon_action_button(
+                                            self,
                                             ToolbarIcon::AttachImage,
                                             self.theme.panel_fill_soft,
                                             self.theme.text_color,
@@ -1065,6 +1164,7 @@ impl eframe::App for AiPopupApp {
                                         .add_enabled(
                                             self.config.history.enabled,
                                             icon_action_button(
+                                                self,
                                                 if self.show_history {
                                                     ToolbarIcon::HistoryOpen
                                                 } else {
@@ -1088,6 +1188,7 @@ impl eframe::App for AiPopupApp {
                                         .add_enabled(
                                             !self.response.is_empty(),
                                             icon_action_button(
+                                                self,
                                                 ToolbarIcon::Copy,
                                                 self.theme.panel_fill_soft,
                                                 self.theme.text_color,
@@ -1422,12 +1523,14 @@ fn secondary_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::But
 }
 
 fn icon_action_button(
+    app: &AiPopupApp,
     icon: ToolbarIcon,
     fill: egui::Color32,
     stroke_color: egui::Color32,
 ) -> impl egui::Widget {
     IconActionButton {
         icon,
+        texture: app.toolbar_icon_textures.get(&icon).cloned(),
         fill,
         stroke_color,
         size: egui::vec2(34.0, 34.0),
@@ -1436,6 +1539,7 @@ fn icon_action_button(
 
 struct IconActionButton {
     icon: ToolbarIcon,
+    texture: Option<egui::TextureHandle>,
     fill: egui::Color32,
     stroke_color: egui::Color32,
     size: egui::Vec2,
@@ -1467,13 +1571,26 @@ impl egui::Widget for IconActionButton {
 
         ui.painter()
             .rect(rect, egui::Rounding::same(10.0), fill, egui::Stroke::NONE);
-        paint_toolbar_icon(
-            ui.painter(),
-            rect.shrink(8.0),
-            self.icon,
-            stroke,
-            visuals.fg_stroke.color,
-        );
+        if let Some(texture) = self.texture {
+            ui.painter().image(
+                texture.id(),
+                rect.shrink(7.0),
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                if ui.is_enabled() {
+                    self.stroke_color
+                } else {
+                    self.stroke_color.gamma_multiply(0.35)
+                },
+            );
+        } else {
+            paint_toolbar_icon(
+                ui.painter(),
+                rect.shrink(8.0),
+                self.icon,
+                stroke,
+                visuals.fg_stroke.color,
+            );
+        }
         response
     }
 }
@@ -1747,6 +1864,7 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .add(icon_action_button(
+                        app,
                         ToolbarIcon::Close,
                         app.theme.panel_fill_soft,
                         app.theme.text_color,

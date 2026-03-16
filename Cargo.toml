@@ -19,3 +19,4 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = "0.14"
+resvg = "0.43"
