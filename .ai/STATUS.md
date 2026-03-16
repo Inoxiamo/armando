@@ -56,7 +56,7 @@
 - The Ollama base URL remains editable in settings and changing it invalidates the cached model list so the next refresh reads from the new server
 - Opening the settings panel now expands the viewport width when needed so the main prompt/response preview does not get squeezed into a broken narrow layout
 - Prompt actions are grouped directly in the prompt header, while copy/history controls are grouped in the response header for a shorter interaction path
-- Toolbar actions now prefer short text badges over emoji-style glyphs to avoid broken icons on systems with limited font fallback
+- Toolbar actions now use painter-drawn icons for the main controls so they stay visible without relying on emoji or font fallback
 - History reloads when enabled, when the panel is opened, and after every successful response
 - The history list uses its own scroll region, separate from the rest of the UI
 - Opening history expands the window downward through native viewport sizing so the panel remains visible

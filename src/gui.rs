@@ -52,6 +52,21 @@ struct ProviderModelState {
     last_error: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+enum ToolbarIcon {
+    Settings,
+    Send,
+    Clear,
+    Mic,
+    Stop,
+    PasteImage,
+    AttachImage,
+    History,
+    HistoryOpen,
+    Copy,
+    Close,
+}
+
 pub struct AiPopupApp {
     config: Config,
     theme: ResolvedTheme,
@@ -790,9 +805,11 @@ impl eframe::App for AiPopupApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    let gear =
-                                        secondary_action_button("⚙", self.theme.panel_fill_soft)
-                                            .min_size(egui::vec2(34.0, 34.0));
+                                    let gear = icon_action_button(
+                                        ToolbarIcon::Settings,
+                                        self.theme.panel_fill_soft,
+                                        self.theme.text_color,
+                                    );
                                     if ui.add(gear).on_hover_text(settings_open_label).clicked() {
                                         self.set_settings_visibility(ctx, !self.show_settings);
                                     }
@@ -809,7 +826,11 @@ impl eframe::App for AiPopupApp {
                                     let send_clicked = ui
                                         .add_enabled(
                                             !self.is_loading,
-                                            icon_action_button("Run", self.theme.accent_color),
+                                            icon_action_button(
+                                                ToolbarIcon::Send,
+                                                self.theme.accent_color,
+                                                self.theme.accent_text_color,
+                                            ),
                                         )
                                         .on_hover_text(self.tr("app.send"))
                                         .clicked();
@@ -820,8 +841,9 @@ impl eframe::App for AiPopupApp {
                                     if !self.attachments.is_empty()
                                         && ui
                                             .add(icon_action_button(
-                                                "Clr",
+                                                ToolbarIcon::Clear,
                                                 self.theme.panel_fill_soft,
+                                                self.theme.text_color,
                                             ))
                                             .on_hover_text(self.tr("app.clear_images"))
                                             .clicked()
@@ -830,9 +852,9 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     let voice_icon = if self.voice_recording.is_some() {
-                                        "St"
+                                        ToolbarIcon::Stop
                                     } else {
-                                        "Mic"
+                                        ToolbarIcon::Mic
                                     };
                                     let voice_label = if self.voice_recording.is_some() {
                                         self.tr("app.voice_stop")
@@ -843,6 +865,7 @@ impl eframe::App for AiPopupApp {
                                         .add(icon_action_button(
                                             voice_icon,
                                             self.theme.panel_fill_soft,
+                                            self.theme.text_color,
                                         ))
                                         .on_hover_text(voice_label)
                                         .clicked()
@@ -851,7 +874,11 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("Shot", self.theme.panel_fill_soft))
+                                        .add(icon_action_button(
+                                            ToolbarIcon::PasteImage,
+                                            self.theme.panel_fill_soft,
+                                            self.theme.text_color,
+                                        ))
                                         .on_hover_text(self.tr("app.paste_image"))
                                         .clicked()
                                     {
@@ -859,7 +886,11 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("Clip", self.theme.panel_fill_soft))
+                                        .add(icon_action_button(
+                                            ToolbarIcon::AttachImage,
+                                            self.theme.panel_fill_soft,
+                                            self.theme.text_color,
+                                        ))
                                         .on_hover_text(self.tr("app.attach_image"))
                                         .clicked()
                                     {
@@ -1034,12 +1065,17 @@ impl eframe::App for AiPopupApp {
                                         .add_enabled(
                                             self.config.history.enabled,
                                             icon_action_button(
-                                                if self.show_history { "On" } else { "Hist" },
+                                                if self.show_history {
+                                                    ToolbarIcon::HistoryOpen
+                                                } else {
+                                                    ToolbarIcon::History
+                                                },
                                                 if self.show_history {
                                                     self.theme.panel_fill_soft
                                                 } else {
                                                     self.theme.panel_fill
                                                 },
+                                                self.theme.text_color,
                                             ),
                                         )
                                         .on_hover_text(history_label)
@@ -1051,7 +1087,11 @@ impl eframe::App for AiPopupApp {
                                     if ui
                                         .add_enabled(
                                             !self.response.is_empty(),
-                                            icon_action_button("Copy", self.theme.panel_fill_soft),
+                                            icon_action_button(
+                                                ToolbarIcon::Copy,
+                                                self.theme.panel_fill_soft,
+                                                self.theme.text_color,
+                                            ),
                                         )
                                         .on_hover_text(self.tr("app.copy_response"))
                                         .clicked()
@@ -1381,18 +1421,253 @@ fn secondary_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::But
         .min_size(egui::vec2(118.0, 34.0))
 }
 
-fn icon_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::Button<'a> {
-    let width = match label.len() {
-        0..=1 => 34.0,
-        2..=3 => 42.0,
-        4..=5 => 54.0,
-        _ => 64.0,
-    };
-    egui::Button::new(egui::RichText::new(label).strong().size(16.0))
-        .fill(fill)
-        .stroke(egui::Stroke::NONE)
-        .rounding(egui::Rounding::same(10.0))
-        .min_size(egui::vec2(width, 34.0))
+fn icon_action_button(
+    icon: ToolbarIcon,
+    fill: egui::Color32,
+    stroke_color: egui::Color32,
+) -> impl egui::Widget {
+    IconActionButton {
+        icon,
+        fill,
+        stroke_color,
+        size: egui::vec2(34.0, 34.0),
+    }
+}
+
+struct IconActionButton {
+    icon: ToolbarIcon,
+    fill: egui::Color32,
+    stroke_color: egui::Color32,
+    size: egui::Vec2,
+}
+
+impl egui::Widget for IconActionButton {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let sense = egui::Sense::click();
+        let (rect, response) = ui.allocate_exact_size(self.size, sense);
+        let visuals = ui.style().interact(&response);
+
+        let fill = if !ui.is_enabled() {
+            self.fill.gamma_multiply(0.45)
+        } else if response.is_pointer_button_down_on() {
+            lighten(self.fill, 0.06)
+        } else if response.hovered() {
+            lighten(self.fill, 0.04)
+        } else {
+            self.fill
+        };
+        let stroke = egui::Stroke::new(
+            1.8,
+            if !ui.is_enabled() {
+                self.stroke_color.gamma_multiply(0.35)
+            } else {
+                self.stroke_color
+            },
+        );
+
+        ui.painter()
+            .rect(rect, egui::Rounding::same(10.0), fill, egui::Stroke::NONE);
+        paint_toolbar_icon(
+            ui.painter(),
+            rect.shrink(8.0),
+            self.icon,
+            stroke,
+            visuals.fg_stroke.color,
+        );
+        response
+    }
+}
+
+fn paint_toolbar_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    icon: ToolbarIcon,
+    stroke: egui::Stroke,
+    fill_color: egui::Color32,
+) {
+    match icon {
+        ToolbarIcon::Settings => paint_settings_icon(painter, rect, stroke),
+        ToolbarIcon::Send => paint_send_icon(painter, rect, stroke, fill_color),
+        ToolbarIcon::Clear | ToolbarIcon::Close => paint_close_icon(painter, rect, stroke),
+        ToolbarIcon::Mic => paint_mic_icon(painter, rect, stroke),
+        ToolbarIcon::Stop => paint_stop_icon(painter, rect, fill_color),
+        ToolbarIcon::PasteImage => paint_image_icon(painter, rect, stroke, true),
+        ToolbarIcon::AttachImage => paint_attach_icon(painter, rect, stroke),
+        ToolbarIcon::History => paint_history_icon(painter, rect, stroke, false),
+        ToolbarIcon::HistoryOpen => paint_history_icon(painter, rect, stroke, true),
+        ToolbarIcon::Copy => paint_copy_icon(painter, rect, stroke),
+    }
+}
+
+fn paint_close_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    painter.line_segment([rect.left_top(), rect.right_bottom()], stroke);
+    painter.line_segment([rect.right_top(), rect.left_bottom()], stroke);
+}
+
+fn paint_stop_icon(painter: &egui::Painter, rect: egui::Rect, fill: egui::Color32) {
+    painter.rect_filled(rect.shrink(1.5), egui::Rounding::same(2.0), fill);
+}
+
+fn paint_send_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    stroke: egui::Stroke,
+    fill: egui::Color32,
+) {
+    let left = egui::pos2(rect.left(), rect.top() + rect.height() * 0.2);
+    let tip = egui::pos2(rect.right(), rect.center().y);
+    let bottom = egui::pos2(rect.left(), rect.bottom() - rect.height() * 0.2);
+    painter.add(egui::Shape::convex_polygon(
+        vec![left, tip, bottom],
+        fill,
+        stroke,
+    ));
+}
+
+fn paint_mic_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let capsule = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.center().y - 2.0),
+        egui::vec2(rect.width() * 0.42, rect.height() * 0.62),
+    );
+    painter.rect_stroke(capsule, egui::Rounding::same(5.0), stroke);
+    painter.line_segment(
+        [
+            egui::pos2(rect.center().x, capsule.bottom()),
+            egui::pos2(rect.center().x, rect.bottom() - 3.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(rect.center().x - 4.5, rect.bottom() - 3.0),
+            egui::pos2(rect.center().x + 4.5, rect.bottom() - 3.0),
+        ],
+        stroke,
+    );
+}
+
+fn paint_attach_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let x = rect.center().x;
+    let top = rect.top() + 1.5;
+    let bottom = rect.bottom() - 1.5;
+    painter.line_segment(
+        [
+            egui::pos2(x + 3.0, top + 2.0),
+            egui::pos2(x - 1.5, top + 6.5),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(x - 1.5, top + 6.5),
+            egui::pos2(x - 1.5, bottom - 3.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(x - 1.5, bottom - 3.0),
+            egui::pos2(x + 4.0, bottom - 8.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(x + 4.0, bottom - 8.0),
+            egui::pos2(x + 4.0, top + 7.5),
+        ],
+        stroke,
+    );
+}
+
+fn paint_image_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    stroke: egui::Stroke,
+    with_plus: bool,
+) {
+    painter.rect_stroke(rect.shrink(1.0), egui::Rounding::same(3.0), stroke);
+    painter.circle_stroke(egui::pos2(rect.left() + 5.0, rect.top() + 5.0), 1.8, stroke);
+    painter.line_segment(
+        [
+            egui::pos2(rect.left() + 3.0, rect.bottom() - 4.0),
+            egui::pos2(rect.center().x - 1.0, rect.center().y + 1.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(rect.center().x - 1.0, rect.center().y + 1.0),
+            egui::pos2(rect.right() - 3.0, rect.bottom() - 6.0),
+        ],
+        stroke,
+    );
+    if with_plus {
+        painter.line_segment(
+            [
+                egui::pos2(rect.right() - 5.0, rect.top() + 2.5),
+                egui::pos2(rect.right() - 5.0, rect.top() + 8.5),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                egui::pos2(rect.right() - 8.0, rect.top() + 5.5),
+                egui::pos2(rect.right() - 2.0, rect.top() + 5.5),
+            ],
+            stroke,
+        );
+    }
+}
+
+fn paint_history_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    stroke: egui::Stroke,
+    active: bool,
+) {
+    for offset in [0.0_f32, 4.5, 9.0] {
+        painter.line_segment(
+            [
+                egui::pos2(rect.left(), rect.top() + 2.5 + offset),
+                egui::pos2(rect.right(), rect.top() + 2.5 + offset),
+            ],
+            stroke,
+        );
+    }
+    if active {
+        painter.circle_filled(
+            egui::pos2(rect.right() - 1.5, rect.top() + 2.5),
+            2.0,
+            stroke.color,
+        );
+    }
+}
+
+fn paint_copy_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let back = rect.translate(egui::vec2(-2.5, -2.5)).shrink(3.5);
+    let front = rect.translate(egui::vec2(2.0, 2.0)).shrink(3.5);
+    painter.rect_stroke(back, egui::Rounding::same(2.0), stroke);
+    painter.rect_stroke(front, egui::Rounding::same(2.0), stroke);
+}
+
+fn paint_settings_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let center = rect.center();
+    let radius = rect.width().min(rect.height()) * 0.23;
+    for angle in [0.0_f32, 45.0, 90.0, 135.0] {
+        let radians = angle.to_radians();
+        let dir = egui::vec2(radians.cos(), radians.sin());
+        painter.line_segment(
+            [center + dir * (radius + 1.0), center + dir * (radius + 4.5)],
+            stroke,
+        );
+        painter.line_segment(
+            [center - dir * (radius + 1.0), center - dir * (radius + 4.5)],
+            stroke,
+        );
+    }
+    painter.circle_stroke(center, radius + 1.0, stroke);
+    painter.circle_stroke(center, radius * 0.45, stroke);
 }
 
 fn editor_resize_handle(
@@ -1471,10 +1746,12 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
             ui.label(section_label(&app.tr("app.settings"), app.theme.text_color));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .add(secondary_action_button(
-                        &app.tr("settings.close"),
+                    .add(icon_action_button(
+                        ToolbarIcon::Close,
                         app.theme.panel_fill_soft,
+                        app.theme.text_color,
                     ))
+                    .on_hover_text(app.tr("settings.close"))
                     .clicked()
                 {
                     app.set_settings_visibility(ctx, false);
