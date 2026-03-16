@@ -16,9 +16,16 @@ pub struct ImageAttachment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationTurn {
+    pub user_prompt: String,
+    pub assistant_response: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryInput {
     pub prompt: String,
     pub images: Vec<ImageAttachment>,
+    pub conversation: Vec<ConversationTurn>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +50,13 @@ pub struct HealthCheck {
 }
 
 pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: PromptMode) -> String {
-    let prepared_prompt = prepare_prompt(&input.prompt, config, mode, !input.images.is_empty());
+    let prepared_prompt = prepare_prompt(
+        &input.prompt,
+        &input.conversation,
+        config,
+        mode,
+        !input.images.is_empty(),
+    );
     let res = match backend {
         "chatgpt" => chatgpt::query(&prepared_prompt, &input.images, config).await,
         "claude" => claude::query(&prepared_prompt, &input.images, config).await,
@@ -236,7 +249,13 @@ fn error(backend: &str, summary: &str, detail: &str) -> HealthCheck {
     }
 }
 
-fn prepare_prompt(prompt: &str, config: &Config, mode: PromptMode, has_images: bool) -> String {
+fn prepare_prompt(
+    prompt: &str,
+    conversation: &[ConversationTurn],
+    config: &Config,
+    mode: PromptMode,
+    has_images: bool,
+) -> String {
     let (expanded_prompt, detected_tags) = expand_tags(prompt, config.aliases.as_ref());
     let mut instructions = match mode {
         PromptMode::TextAssist => vec![
@@ -290,9 +309,35 @@ fn prepare_prompt(prompt: &str, config: &Config, mode: PromptMode, has_images: b
         expanded_prompt.trim().to_string()
     };
 
+    let conversation_block = if conversation.is_empty() {
+        String::new()
+    } else {
+        let turns = conversation
+            .iter()
+            .rev()
+            .take(8)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|turn| {
+                format!(
+                    "Utente:\n{}\n\nAssistente:\n{}",
+                    turn.user_prompt.trim(),
+                    turn.assistant_response.trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n");
+        format!(
+            "\n\nContesto conversazione corrente:\nMantieni continuita con questi turni precedenti della stessa sessione popup.\n\n{}",
+            turns
+        )
+    };
+
     format!(
-        "{}\n\nRichiesta utente:\n{}",
+        "{}{}\n\nRichiesta utente:\n{}",
         instructions.join("\n"),
+        conversation_block,
         effective_prompt
     )
 }
@@ -426,8 +471,10 @@ mod tests {
     fn text_assist_prompt_keeps_cleanup_instructions() {
         let prompt = prepare_prompt(
             "sistema questo testo",
+            &[],
             &test_config(),
             PromptMode::TextAssist,
+            false,
         );
 
         assert!(prompt.contains("Agisci principalmente come assistente di pulizia"));
@@ -439,8 +486,10 @@ mod tests {
     fn generic_question_uses_markdown_by_default() {
         let prompt = prepare_prompt(
             "come funziona docker compose?",
+            &[],
             &test_config(),
             PromptMode::GenericQuestion,
+            false,
         );
 
         assert!(
@@ -454,8 +503,10 @@ mod tests {
     fn generic_question_with_cmd_returns_command_only_instruction() {
         let prompt = prepare_prompt(
             "CMD: dammi il comando per vedere i processi",
+            &[],
             &test_config(),
             PromptMode::GenericQuestion,
+            false,
         );
 
         assert!(prompt.contains("solo il comando finale"));
@@ -488,5 +539,23 @@ mod tests {
     fn parse_header_tags_accepts_cmd() {
         let tags = parse_header_tags("CMD SHORT", test_config().aliases.as_ref());
         assert_eq!(tags, vec!["CMD".to_string(), "SHORT".to_string()]);
+    }
+
+    #[test]
+    fn conversation_context_is_embedded_when_present() {
+        let prompt = prepare_prompt(
+            "continua la conversazione",
+            &[ConversationTurn {
+                user_prompt: "come stai?".to_string(),
+                assistant_response: "bene".to_string(),
+            }],
+            &test_config(),
+            PromptMode::GenericQuestion,
+            false,
+        );
+
+        assert!(prompt.contains("Contesto conversazione corrente"));
+        assert!(prompt.contains("Utente:\ncome stai?"));
+        assert!(prompt.contains("Assistente:\nbene"));
     }
 }

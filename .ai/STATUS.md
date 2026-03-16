@@ -20,6 +20,7 @@
 - Project icon integrated both in the native viewport and in the local desktop installation assets
 - Prompt preparation optimized for cleanup, rewriting, translation, and text adaptation
 - UI toggle between text-assist mode and generic-question mode
+- Optional checkbox to keep an in-memory chat session inside the current popup run
 - Image attachments from file picker
 - Screenshot/image paste from clipboard
 - Voice dictation flow with microphone recording and OpenAI transcription
@@ -39,6 +40,7 @@
 - The prompt area can now carry text plus zero or more attached images
 - Clipboard screenshots are converted to PNG and attached directly from the UI
 - Voice dictation records microphone audio through `ffmpeg` or `arecord` when available, then appends the transcription to the prompt
+- When chat session mode is enabled, previous popup turns are reused as conversational context for the next request
 - History reloads when the panel is opened and after every successful response
 - The history list uses its own scroll region, separate from the rest of the UI
 - Opening history expands the window downward through native viewport sizing so the panel remains visible

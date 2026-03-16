@@ -3,6 +3,7 @@ name: English
 strings:
   app.backend: "Backend"
   app.generic_mode: "Generic question mode"
+  app.session_chat_mode: "Keep chat session"
   app.prompt_hint: "Write your prompt here..."
   app.helper_waiting: "Waiting for {backend}..."
   app.helper_ready: "Enter sends, Shift+Enter adds a newline, Ctrl+Enter copies and closes, Esc closes."

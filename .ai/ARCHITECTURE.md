@@ -16,7 +16,7 @@
   Application entry point. Loads config and theme, configures the native viewport, and opens the popup UI directly.
 
 - `src/gui.rs`
-  Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
+  Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, optional in-memory chat session state, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
 
 - `src/config.rs`
   Defines the YAML configuration schema, persistence behavior, and config path resolution.
@@ -53,13 +53,14 @@
 4. The desktop popup UI opens directly
 5. The UI may preload selected text from the OS
 6. The user can enrich the prompt with attached images, clipboard screenshots, or voice dictation
-7. Voice dictation records to a temporary audio file and sends it to OpenAI transcription before appending text to the prompt
-8. The user submits a prompt
-9. An async task queries the selected backend
-10. Successful responses are appended to local history
-11. The response is rendered in the popup
-12. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
-13. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+7. The user can optionally keep the current popup session conversational through an in-memory turn buffer
+8. Voice dictation records to a temporary audio file and sends it to OpenAI transcription before appending text to the prompt
+9. The user submits a prompt
+10. An async task queries the selected backend
+11. Successful responses are appended to local history
+12. The response is rendered in the popup
+13. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
+14. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
 
 ## UI Structure
 

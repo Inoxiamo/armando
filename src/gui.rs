@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 
 use crate::backends;
 use crate::backends::PromptMode;
-use crate::backends::{HealthCheck, HealthLevel, ImageAttachment, QueryInput};
+use crate::backends::{ConversationTurn, HealthCheck, HealthLevel, ImageAttachment, QueryInput};
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
@@ -41,6 +41,8 @@ struct RequestFingerprint {
     prompt: String,
     images: Vec<ImageAttachment>,
     mode: PromptMode,
+    session_chat_enabled: bool,
+    conversation: Vec<ConversationTurn>,
 }
 
 pub struct AiPopupApp {
@@ -61,6 +63,8 @@ pub struct AiPopupApp {
     voice_recording: Option<VoiceRecording>,
     prompt_focus_initialized: bool,
     generic_question_mode: bool,
+    session_chat_enabled: bool,
+    session_conversation: Vec<ConversationTurn>,
     session_history_entries: Vec<HistoryEntry>,
     history_entries: Vec<HistoryEntry>,
     history_error: Option<String>,
@@ -129,6 +133,8 @@ impl AiPopupApp {
             voice_recording: None,
             prompt_focus_initialized: false,
             generic_question_mode: false,
+            session_chat_enabled: false,
+            session_conversation: Vec::new(),
             session_history_entries: Vec::new(),
             history_entries,
             history_error,
@@ -164,6 +170,12 @@ impl AiPopupApp {
                     if let Some((backend, prompt)) = self.pending_submission.take() {
                         if let Ok(entry) = history::new_entry(&backend, &prompt, &self.response) {
                             self.session_history_entries.insert(0, entry);
+                        }
+                        if self.session_chat_enabled {
+                            self.session_conversation.push(ConversationTurn {
+                                user_prompt: prompt,
+                                assistant_response: self.response.clone(),
+                            });
                         }
                     }
                     self.last_completed_request = Some(self.current_request_fingerprint());
@@ -229,6 +241,11 @@ impl AiPopupApp {
 
         let prompt = self.prompt.clone();
         let images = self.attachments.clone();
+        let conversation = if self.session_chat_enabled {
+            self.session_conversation.clone()
+        } else {
+            Vec::new()
+        };
         let backend = self.selected_backend.clone();
         let mode = if self.generic_question_mode {
             PromptMode::GenericQuestion
@@ -244,8 +261,17 @@ impl AiPopupApp {
 
         // Spawn async task
         self.runtime.spawn(async move {
-            let res =
-                backends::query(&backend, &QueryInput { prompt, images }, &config, mode).await;
+            let res = backends::query(
+                &backend,
+                &QueryInput {
+                    prompt,
+                    images,
+                    conversation,
+                },
+                &config,
+                mode,
+            )
+            .await;
 
             // Store result
             *async_response.lock().unwrap() = Some(Ok(res));
@@ -565,6 +591,12 @@ impl AiPopupApp {
             } else {
                 PromptMode::TextAssist
             },
+            session_chat_enabled: self.session_chat_enabled,
+            conversation: if self.session_chat_enabled {
+                self.session_conversation.clone()
+            } else {
+                Vec::new()
+            },
         }
     }
 }
@@ -610,6 +642,7 @@ impl eframe::App for AiPopupApp {
                         let all_backends = self.tr("app.all_backends");
                         let backend_label = self.tr("app.backend");
                         let generic_mode_label = self.tr("app.generic_mode");
+                        let session_chat_label = self.tr("app.session_chat_mode");
                         let settings_open_label = self.tr("app.settings_open");
 
                         ui.horizontal(|ui| {
@@ -648,6 +681,8 @@ impl eframe::App for AiPopupApp {
                                 });
                             ui.add_space(6.0);
                             ui.checkbox(&mut self.generic_question_mode, generic_mode_label);
+                            ui.add_space(6.0);
+                            ui.checkbox(&mut self.session_chat_enabled, session_chat_label);
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
