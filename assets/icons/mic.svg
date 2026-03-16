@@ -1,6 +1,7 @@
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="8" y="3.8" width="8" height="10.8" rx="4" stroke="white" stroke-width="1.8"/>
-  <path d="M6.5 11.8C6.5 14.9 9 17.4 12 17.4C15 17.4 17.5 14.9 17.5 11.8" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
-  <path d="M12 17.4V20.5" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
-  <path d="M9.2 20.5H14.8" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
-</svg>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Transformed by: SVG Repo Mixer Tools -->
+<svg width="64px" height="64px" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="#ffffff" stroke="#ffffff">
+<g id="SVGRepo_bgCarrier" stroke-width="0"/>
+<g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="SVGRepo_iconCarrier"> <path d="M0 0h48v48H0z" fill="none"/> <g id="Shopicon"> <path d="M16,12.001v8c0,4.411,3.589,8,8,8s8-3.589,8-8v-8c0-4.411-3.589-8-8-8S16,7.59,16,12.001z M28,12.001v8 c0,2.206-1.794,4-4,4s-4-1.794-4-4v-8c0-2.206,1.794-4,4-4S28,9.795,28,12.001z"/> <path d="M36,20c0,6.617-5.383,12-12,12s-12-5.383-12-12v-2H8v2c0,8.144,6.12,14.872,14,15.861v4.14h-6.02v4H22h4h6v-4h-6v-4.14 C33.88,34.872,40,28.144,40,20v-2h-4V20z"/> </g> </g>
+</svg>
