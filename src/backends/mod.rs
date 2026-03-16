@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::history;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageAttachment {
     pub name: String,
     pub mime_type: String,
@@ -15,7 +15,7 @@ pub struct ImageAttachment {
     pub size_bytes: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryInput {
     pub prompt: String,
     pub images: Vec<ImageAttachment>,

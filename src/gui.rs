@@ -35,6 +35,14 @@ struct VoiceRecording {
     path: PathBuf,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct RequestFingerprint {
+    backend: String,
+    prompt: String,
+    images: Vec<ImageAttachment>,
+    mode: PromptMode,
+}
+
 pub struct AiPopupApp {
     config: Config,
     theme: ResolvedTheme,
@@ -48,6 +56,7 @@ pub struct AiPopupApp {
     attachment_error: Option<String>,
     selected_backend: String,
     is_loading: bool,
+    auto_copy_close_after_response: bool,
     dictation_status: Option<String>,
     voice_recording: Option<VoiceRecording>,
     prompt_focus_initialized: bool,
@@ -71,6 +80,7 @@ pub struct AiPopupApp {
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
+    last_completed_request: Option<RequestFingerprint>,
 }
 
 impl AiPopupApp {
@@ -114,6 +124,7 @@ impl AiPopupApp {
             attachment_error: None,
             selected_backend: default_backend,
             is_loading: false,
+            auto_copy_close_after_response: false,
             dictation_status: None,
             voice_recording: None,
             prompt_focus_initialized: false,
@@ -135,6 +146,7 @@ impl AiPopupApp {
             i18n,
             async_response: Arc::new(Mutex::new(None)),
             async_dictation: Arc::new(Mutex::new(None)),
+            last_completed_request: None,
         }
     }
 
@@ -154,11 +166,17 @@ impl AiPopupApp {
                             self.session_history_entries.insert(0, entry);
                         }
                     }
+                    self.last_completed_request = Some(self.current_request_fingerprint());
                     self.reload_history();
+                    if self.auto_copy_close_after_response {
+                        self.auto_copy_close_after_response = false;
+                        self.copy_response_and_close(_ctx);
+                    }
                 }
                 Err(e) => {
                     self.response = format!("Error: {}", e);
                     self.pending_submission = None;
+                    self.auto_copy_close_after_response = false;
                 }
             }
         }
@@ -189,6 +207,20 @@ impl AiPopupApp {
 
     fn submit_prompt(&mut self, ctx: &egui::Context) {
         if (self.prompt.trim().is_empty() && self.attachments.is_empty()) || self.is_loading {
+            return;
+        }
+
+        let current_request = self.current_request_fingerprint();
+        if self
+            .last_completed_request
+            .as_ref()
+            .is_some_and(|last| *last == current_request)
+            && !self.response.trim().is_empty()
+        {
+            if self.auto_copy_close_after_response {
+                self.auto_copy_close_after_response = false;
+                self.copy_response_and_close(ctx);
+            }
             return;
         }
 
@@ -522,6 +554,19 @@ impl AiPopupApp {
 
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
+
+    fn current_request_fingerprint(&self) -> RequestFingerprint {
+        RequestFingerprint {
+            backend: self.selected_backend.clone(),
+            prompt: self.prompt.clone(),
+            images: self.attachments.clone(),
+            mode: if self.generic_question_mode {
+                PromptMode::GenericQuestion
+            } else {
+                PromptMode::TextAssist
+            },
+        }
+    }
 }
 
 impl eframe::App for AiPopupApp {
@@ -662,7 +707,8 @@ impl eframe::App for AiPopupApp {
                                 && !i.modifiers.shift
                                 && !i.modifiers.alt
                         }) {
-                            self.copy_response_and_close(ctx);
+                            self.auto_copy_close_after_response = true;
+                            self.submit_prompt(ctx);
                         }
 
                         ui.add_space(8.0);
