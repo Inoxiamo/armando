@@ -803,7 +803,7 @@ impl eframe::App for AiPopupApp {
                                     let send_clicked = ui
                                         .add_enabled(
                                             !self.is_loading,
-                                            icon_action_button("➤", self.theme.accent_color),
+                                            icon_action_button("Go", self.theme.accent_color),
                                         )
                                         .on_hover_text(self.tr("app.send"))
                                         .clicked();
@@ -814,7 +814,7 @@ impl eframe::App for AiPopupApp {
                                     if !self.attachments.is_empty()
                                         && ui
                                             .add(icon_action_button(
-                                                "✕",
+                                                "X",
                                                 self.theme.panel_fill_soft,
                                             ))
                                             .on_hover_text(self.tr("app.clear_images"))
@@ -824,9 +824,9 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     let voice_icon = if self.voice_recording.is_some() {
-                                        "■"
+                                        "St"
                                     } else {
-                                        "🎙"
+                                        "Mic"
                                     };
                                     let voice_label = if self.voice_recording.is_some() {
                                         self.tr("app.voice_stop")
@@ -845,7 +845,7 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("🖼", self.theme.panel_fill_soft))
+                                        .add(icon_action_button("Shot", self.theme.panel_fill_soft))
                                         .on_hover_text(self.tr("app.paste_image"))
                                         .clicked()
                                     {
@@ -853,7 +853,7 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("📎", self.theme.panel_fill_soft))
+                                        .add(icon_action_button("Img", self.theme.panel_fill_soft))
                                         .on_hover_text(self.tr("app.attach_image"))
                                         .clicked()
                                     {
@@ -861,7 +861,7 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("＋", self.theme.panel_fill_soft))
+                                        .add(icon_action_button("+", self.theme.panel_fill_soft))
                                         .on_hover_text(self.tr_with(
                                             "app.editor_grow",
                                             &[("section", prompt_section_label.clone())],
@@ -873,7 +873,7 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("－", self.theme.panel_fill_soft))
+                                        .add(icon_action_button("-", self.theme.panel_fill_soft))
                                         .on_hover_text(self.tr_with(
                                             "app.editor_shrink",
                                             &[("section", prompt_section_label.clone())],
@@ -1045,7 +1045,7 @@ impl eframe::App for AiPopupApp {
                                         .add_enabled(
                                             self.config.history.enabled,
                                             icon_action_button(
-                                                if self.show_history { "🕘" } else { "☰" },
+                                                if self.show_history { "On" } else { "Hist" },
                                                 if self.show_history {
                                                     self.theme.panel_fill_soft
                                                 } else {
@@ -1062,7 +1062,7 @@ impl eframe::App for AiPopupApp {
                                     if ui
                                         .add_enabled(
                                             !self.response.is_empty(),
-                                            icon_action_button("⧉", self.theme.panel_fill_soft),
+                                            icon_action_button("Copy", self.theme.panel_fill_soft),
                                         )
                                         .on_hover_text(self.tr("app.copy_response"))
                                         .clicked()
@@ -1073,7 +1073,7 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("＋", self.theme.panel_fill_soft))
+                                        .add(icon_action_button("+", self.theme.panel_fill_soft))
                                         .on_hover_text(self.tr_with(
                                             "app.editor_grow",
                                             &[("section", response_section_label.clone())],
@@ -1086,7 +1086,7 @@ impl eframe::App for AiPopupApp {
                                     }
 
                                     if ui
-                                        .add(icon_action_button("－", self.theme.panel_fill_soft))
+                                        .add(icon_action_button("-", self.theme.panel_fill_soft))
                                         .on_hover_text(self.tr_with(
                                             "app.editor_shrink",
                                             &[("section", response_section_label.clone())],
@@ -1412,11 +1412,17 @@ fn secondary_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::But
 }
 
 fn icon_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::Button<'a> {
+    let width = match label.len() {
+        0..=1 => 34.0,
+        2..=3 => 42.0,
+        4..=5 => 54.0,
+        _ => 64.0,
+    };
     egui::Button::new(egui::RichText::new(label).strong().size(16.0))
         .fill(fill)
         .stroke(egui::Stroke::NONE)
         .rounding(egui::Rounding::same(10.0))
-        .min_size(egui::vec2(34.0, 34.0))
+        .min_size(egui::vec2(width, 34.0))
 }
 
 fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -> egui::Frame {
