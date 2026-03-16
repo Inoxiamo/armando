@@ -120,18 +120,9 @@ fn render_svg_icon(svg: &str) -> Result<egui::ColorImage, String> {
         &mut pixmap.as_mut(),
     );
 
-    let mut rgba = pixmap.data().to_vec();
-    for pixel in rgba.chunks_exact_mut(4) {
-        if pixel[3] > 0 {
-            pixel[0] = 255;
-            pixel[1] = 255;
-            pixel[2] = 255;
-        }
-    }
-
     Ok(egui::ColorImage::from_rgba_unmultiplied(
         [TARGET_SIZE as usize, TARGET_SIZE as usize],
-        &rgba,
+        pixmap.data(),
     ))
 }
 
