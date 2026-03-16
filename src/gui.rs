@@ -103,7 +103,7 @@ fn load_toolbar_icon_textures(ctx: &egui::Context) -> HashMap<ToolbarIcon, egui:
 }
 
 fn render_svg_icon(svg: &str) -> Result<egui::ColorImage, String> {
-    const TARGET_SIZE: u32 = 96;
+    const TARGET_SIZE: u32 = 256;
 
     let options = resvg::usvg::Options::default();
     let tree =
@@ -1572,7 +1572,7 @@ fn icon_action_button(
         texture: app.toolbar_icon_textures.get(&icon).cloned(),
         fill,
         stroke_color,
-        size: egui::vec2(34.0, 34.0),
+        size: egui::vec2(36.0, 36.0),
     }
 }
 
@@ -1611,9 +1611,14 @@ impl egui::Widget for IconActionButton {
         ui.painter()
             .rect(rect, egui::Rounding::same(10.0), fill, egui::Stroke::NONE);
         if let Some(texture) = self.texture {
+            let image_rect = rect.shrink(5.0);
+            let image_rect = egui::Rect::from_min_max(
+                egui::pos2(image_rect.min.x.round(), image_rect.min.y.round()),
+                egui::pos2(image_rect.max.x.round(), image_rect.max.y.round()),
+            );
             ui.painter().image(
                 texture.id(),
-                rect.shrink(7.0),
+                image_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 if ui.is_enabled() {
                     self.stroke_color
