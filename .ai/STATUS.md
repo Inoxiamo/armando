@@ -51,6 +51,7 @@
 - Default assistant behavior prefers output that can be reapplied immediately
 - In `Generic question` mode, the prompt is treated as a direct question rather than text to rewrite
 - In `Generic question` mode, the `CMD` tag requests only the final command; without `CMD`, the answer is formatted as Markdown
+- In `Generic question` mode, text-assist aliases and rewrite-oriented prompt expansions are bypassed, even if in-memory chat session mode is enabled
 
 ## Known Gaps
 

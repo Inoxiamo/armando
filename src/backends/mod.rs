@@ -256,7 +256,10 @@ fn prepare_prompt(
     mode: PromptMode,
     has_images: bool,
 ) -> String {
-    let (expanded_prompt, detected_tags) = expand_tags(prompt, config.aliases.as_ref());
+    let (expanded_prompt, detected_tags) = match mode {
+        PromptMode::TextAssist => expand_tags(prompt, config.aliases.as_ref()),
+        PromptMode::GenericQuestion => expand_generic_question_prompt(prompt),
+    };
     let mut instructions = match mode {
         PromptMode::TextAssist => vec![
             "Agisci principalmente come assistente di pulizia, ottimizzazione, correzione, traduzione e adattamento del testo.".to_string(),
@@ -329,7 +332,7 @@ fn prepare_prompt(
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
         format!(
-            "\n\nContesto conversazione corrente:\nMantieni continuita con questi turni precedenti della stessa sessione popup.\n\n{}",
+            "\n\nContesto conversazione corrente:\nUsa questi turni precedenti solo come contesto della conversazione in corso. Non reinterpretare automaticamente la nuova richiesta come compito di pulizia o trasformazione del testo, a meno che l'utente lo chieda esplicitamente.\n\n{}",
             turns
         )
     };
@@ -340,6 +343,20 @@ fn prepare_prompt(
         conversation_block,
         effective_prompt
     )
+}
+
+fn expand_generic_question_prompt(prompt: &str) -> (String, Vec<String>) {
+    let Some(colon_idx) = prompt.find(':') else {
+        return (prompt.trim().to_string(), Vec::new());
+    };
+
+    let header = prompt[..colon_idx].trim();
+    let body = prompt[colon_idx + 1..].trim_start();
+    if header.eq_ignore_ascii_case("CMD") && !body.is_empty() {
+        return (body.trim().to_string(), vec!["CMD".to_string()]);
+    }
+
+    (prompt.trim().to_string(), Vec::new())
 }
 
 fn expand_tags(prompt: &str, aliases: Option<&HashMap<String, String>>) -> (String, Vec<String>) {
@@ -512,6 +529,22 @@ mod tests {
         assert!(prompt.contains("solo il comando finale"));
         assert!(!prompt.contains("Formatta la risposta in Markdown chiaro e leggibile"));
         assert!(prompt.contains("Applica automaticamente queste istruzioni di contesto: CMD."));
+        assert!(prompt.contains("Richiesta utente:\ndammi il comando per vedere i processi"));
+    }
+
+    #[test]
+    fn generic_question_does_not_expand_standard_text_assist_aliases() {
+        let prompt = prepare_prompt(
+            "TITLE: armando popup ai",
+            &[],
+            &test_config(),
+            PromptMode::GenericQuestion,
+            false,
+        );
+
+        assert!(!prompt.contains("Trasforma il testo in un titolo breve."));
+        assert!(!prompt.contains("Applica automaticamente queste istruzioni di contesto"));
+        assert!(prompt.contains("Richiesta utente:\nTITLE: armando popup ai"));
     }
 
     #[test]
@@ -557,5 +590,8 @@ mod tests {
         assert!(prompt.contains("Contesto conversazione corrente"));
         assert!(prompt.contains("Utente:\ncome stai?"));
         assert!(prompt.contains("Assistente:\nbene"));
+        assert!(prompt.contains(
+            "Non reinterpretare automaticamente la nuova richiesta come compito di pulizia"
+        ));
     }
 }
