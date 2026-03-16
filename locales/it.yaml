@@ -75,6 +75,7 @@ strings:
   settings.claude_key: "Chiave API Anthropic"
   settings.claude_model: "Modello Claude"
   settings.ollama_url: "URL base Ollama"
+  settings.ollama_url_hint: "Esempio: http://localhost:11434 oppure http://localhost:1143"
   settings.ollama_model: "Modello Ollama"
   settings.auto_read_selection: "Leggi automaticamente il testo selezionato"
   settings.close: "Chiudi"

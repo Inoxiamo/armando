@@ -35,5 +35,6 @@ claude:
   model: "claude-3-5-sonnet-latest"
 
 ollama:
+  # You can change host or port here, for example http://localhost:1143
   base_url: "http://localhost:11434"
   model: "gemma3:1b"

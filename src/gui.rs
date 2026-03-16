@@ -2271,6 +2271,13 @@ fn provider_settings_section(
             }
             changed |= primary_changed;
 
+            if provider == "ollama" {
+                ui.label(muted_label(
+                    &app.tr("settings.ollama_url_hint"),
+                    theme.weak_text_color,
+                ));
+            }
+
             let model_state = app
                 .provider_model_states
                 .entry(provider.to_string())
