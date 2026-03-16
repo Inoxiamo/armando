@@ -1,4 +1,6 @@
-FROM rust:1.86-bookworm
+FROM rust:1.88-bookworm
+
+RUN rustup component add rustfmt
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

@@ -19,6 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
       - name: Build test runner image
         run: docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
 

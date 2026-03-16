@@ -128,6 +128,8 @@ fn bundled_install_script_populates_home_profile_layout() {
         .arg("scripts/install.sh")
         .current_dir(&bundle_root)
         .env("HOME", &home_dir)
+        .env("XDG_CONFIG_HOME", home_dir.join(".config"))
+        .env("XDG_DATA_HOME", home_dir.join(".local/share"))
         .output()
         .unwrap();
 
@@ -145,6 +147,9 @@ fn bundled_install_script_populates_home_profile_layout() {
         .exists());
     assert!(home_dir.join(".config/armando/locales/en.yaml").exists());
     assert!(home_dir
+        .join(".local/share/armando/assets/armando.svg")
+        .exists());
+    assert!(home_dir
         .join(".local/share/icons/hicolor/scalable/apps/armando.svg")
         .exists());
 
@@ -155,4 +160,96 @@ fn bundled_install_script_populates_home_profile_layout() {
     assert!(!desktop_entry.contains("${HOME}"));
 
     support::remove_dir_all_if_exists(&temp_dir);
+}
+
+#[test]
+fn bundled_install_script_uses_macos_application_support_layout() {
+    let _guard = support::test_lock();
+    let temp_dir = support::unique_temp_dir("bundle-macos");
+    let bundle_root = temp_dir.join("bundle");
+    let scripts_dir = bundle_root.join("scripts");
+    let configs_dir = bundle_root.join("configs");
+    let themes_dir = bundle_root.join("themes");
+    let locales_dir = bundle_root.join("locales");
+    let assets_dir = bundle_root.join("assets");
+    std::fs::create_dir_all(&scripts_dir).unwrap();
+    std::fs::create_dir_all(&configs_dir).unwrap();
+    std::fs::create_dir_all(&themes_dir).unwrap();
+    std::fs::create_dir_all(&locales_dir).unwrap();
+    std::fs::create_dir_all(&assets_dir).unwrap();
+
+    let binary_path = bundle_root.join("armando");
+    std::fs::write(&binary_path, "#!/usr/bin/env bash\necho installed\n").unwrap();
+    support::make_executable(&binary_path);
+    std::fs::copy(
+        support::repo_root().join("scripts/release-install.sh"),
+        scripts_dir.join("install.sh"),
+    )
+    .unwrap();
+    support::make_executable(&scripts_dir.join("install.sh"));
+    std::fs::copy(
+        support::repo_root().join("configs/default.yaml"),
+        configs_dir.join("default.yaml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        support::repo_root().join("themes/default-dark.yaml"),
+        themes_dir.join("default-dark.yaml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        support::repo_root().join("locales/en.yaml"),
+        locales_dir.join("en.yaml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        support::repo_root().join("assets/armando.svg"),
+        assets_dir.join("armando.svg"),
+    )
+    .unwrap();
+
+    let home_dir = temp_dir.join("home");
+    std::fs::create_dir_all(&home_dir).unwrap();
+    let output = Command::new("bash")
+        .arg("scripts/install.sh")
+        .current_dir(&bundle_root)
+        .env("HOME", &home_dir)
+        .env("ARMANDO_INSTALL_OS", "Darwin")
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_DATA_HOME")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(home_dir.join(".local/bin/armando").exists());
+    assert!(home_dir
+        .join("Library/Application Support/armando/configs/default.yaml")
+        .exists());
+    assert!(home_dir
+        .join("Library/Application Support/armando/themes/default-dark.yaml")
+        .exists());
+    assert!(home_dir
+        .join("Library/Application Support/armando/locales/en.yaml")
+        .exists());
+    assert!(home_dir
+        .join("Library/Application Support/armando/assets/armando.svg")
+        .exists());
+
+    support::remove_dir_all_if_exists(&temp_dir);
+}
+
+#[test]
+fn windows_install_script_targets_appdata_and_assets() {
+    let script =
+        std::fs::read_to_string(support::repo_root().join("scripts/release-install.ps1")).unwrap();
+
+    assert!(script.contains("$env:APPDATA"));
+    assert!(script.contains("$env:LOCALAPPDATA"));
+    assert!(script.contains("Join-Path $DataRoot \"bin\""));
+    assert!(script.contains("Join-Path $DataRoot \"assets\""));
+    assert!(script.contains("Copy-Item (Join-Path $BundleAssetsDir \"*\") $AssetsDir"));
 }

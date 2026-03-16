@@ -10,7 +10,7 @@ pub fn test_lock() -> MutexGuard<'static, ()> {
     TEST_MUTEX
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("global test mutex poisoned")
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub fn repo_root() -> PathBuf {

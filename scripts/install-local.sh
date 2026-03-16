@@ -4,12 +4,27 @@ set -euo pipefail
 APP_NAME="armando"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="${HOME}/.local/bin"
-CONFIG_ROOT="${HOME}/.config/${APP_NAME}"
+PLATFORM="${ARMANDO_INSTALL_OS:-$(uname -s)}"
+
+case "${PLATFORM}" in
+  Linux)
+    CONFIG_ROOT="${XDG_CONFIG_HOME:-${HOME}/.config}/${APP_NAME}"
+    DATA_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/${APP_NAME}"
+    ;;
+  Darwin)
+    CONFIG_ROOT="${HOME}/Library/Application Support/${APP_NAME}"
+    DATA_ROOT="${HOME}/Library/Application Support/${APP_NAME}"
+    ;;
+  *)
+    echo "Unsupported platform for install-local.sh: ${PLATFORM}" >&2
+    exit 1
+    ;;
+esac
+
 CONFIG_DIR="${CONFIG_ROOT}/configs"
 THEMES_DIR="${CONFIG_ROOT}/themes"
 LOCALES_DIR="${CONFIG_ROOT}/locales"
-ICON_DIR="${HOME}/.local/share/icons/hicolor/scalable/apps"
-DESKTOP_DIR="${HOME}/.local/share/applications"
+ASSETS_DIR="${DATA_ROOT}/assets"
 RELEASE_BIN="${ROOT_DIR}/target/release/${APP_NAME}"
 CONFIG_SOURCE="${ROOT_DIR}/configs/default.yaml"
 ICON_SOURCE="${ROOT_DIR}/assets/${APP_NAME}.svg"
@@ -20,8 +35,7 @@ mkdir -p \
   "${CONFIG_DIR}" \
   "${THEMES_DIR}" \
   "${LOCALES_DIR}" \
-  "${ICON_DIR}" \
-  "${DESKTOP_DIR}"
+  "${ASSETS_DIR}"
 
 cargo build --release --manifest-path "${ROOT_DIR}/Cargo.toml"
 
@@ -39,9 +53,16 @@ for locale_file in "${ROOT_DIR}"/locales/*.yaml; do
   install -m 0644 "${locale_file}" "${LOCALES_DIR}/$(basename "${locale_file}")"
 done
 
-install -m 0644 "${ICON_SOURCE}" "${ICON_DIR}/${APP_NAME}.svg"
-sed "s|\${HOME}|${HOME}|g" "${DESKTOP_SOURCE}" > "${DESKTOP_DIR}/${APP_NAME}.desktop"
-chmod 0644 "${DESKTOP_DIR}/${APP_NAME}.desktop"
+cp -R "${ROOT_DIR}/assets/." "${ASSETS_DIR}/"
+
+if [[ "${PLATFORM}" == "Linux" ]]; then
+  ICON_DIR="${HOME}/.local/share/icons/hicolor/scalable/apps"
+  DESKTOP_DIR="${HOME}/.local/share/applications"
+  mkdir -p "${ICON_DIR}" "${DESKTOP_DIR}"
+  install -m 0644 "${ICON_SOURCE}" "${ICON_DIR}/${APP_NAME}.svg"
+  sed "s|\${HOME}|${HOME}|g" "${DESKTOP_SOURCE}" > "${DESKTOP_DIR}/${APP_NAME}.desktop"
+  chmod 0644 "${DESKTOP_DIR}/${APP_NAME}.desktop"
+fi
 
 cat <<EOF
 Installed ${APP_NAME}
@@ -58,6 +79,14 @@ Themes:
 Locales:
   ${LOCALES_DIR}
 
+Assets:
+  ${ASSETS_DIR}
+
+EOF
+
+if [[ "${PLATFORM}" == "Linux" ]]; then
+cat <<EOF
+
 Desktop icon:
   ${ICON_DIR}/${APP_NAME}.svg
 
@@ -67,3 +96,10 @@ Desktop entry:
 Add ${BIN_DIR} to your PATH if needed, then bind your OS shortcut to:
   ${BIN_DIR}/${APP_NAME}
 EOF
+else
+cat <<EOF
+
+Add ${BIN_DIR} to your PATH if needed, then launch:
+  ${BIN_DIR}/${APP_NAME}
+EOF
+fi
