@@ -1071,10 +1071,13 @@ impl eframe::App for AiPopupApp {
 
                         if input_resp.has_focus()
                             && ctx.input(|i| {
-                                i.key_pressed(egui::Key::V)
+                                (i.key_pressed(egui::Key::V)
                                     && (i.modifiers.ctrl || i.modifiers.command)
                                     && !i.modifiers.shift
-                                    && !i.modifiers.alt
+                                    && !i.modifiers.alt)
+                                    || i.events
+                                        .iter()
+                                        .any(|event| matches!(event, egui::Event::Paste(_)))
                             })
                         {
                             let _ = self.try_attach_image_from_clipboard(false);
@@ -2405,26 +2408,51 @@ fn load_image_attachment_from_path(path: &Path) -> Result<ImageAttachment, Strin
 fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
     let mut clipboard =
         arboard::Clipboard::new().map_err(|err| format!("Clipboard not available: {}", err))?;
-    let image = clipboard
-        .get_image()
-        .map_err(|_| "Clipboard does not currently contain an image.".to_string())?;
+    if let Ok(image) = clipboard.get_image() {
+        let mut png_bytes = Vec::new();
+        PngEncoder::new(&mut png_bytes)
+            .write_image(
+                image.bytes.as_ref(),
+                image.width as u32,
+                image.height as u32,
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|err| format!("Could not encode clipboard image: {}", err))?;
 
-    let mut png_bytes = Vec::new();
-    PngEncoder::new(&mut png_bytes)
-        .write_image(
-            image.bytes.as_ref(),
-            image.width as u32,
-            image.height as u32,
-            image::ExtendedColorType::Rgba8,
-        )
-        .map_err(|err| format!("Could not encode clipboard image: {}", err))?;
+        return Ok(ImageAttachment {
+            name: "clipboard-screenshot.png".to_string(),
+            mime_type: "image/png".to_string(),
+            data_base64: base64::engine::general_purpose::STANDARD.encode(png_bytes.as_slice()),
+            size_bytes: png_bytes.len(),
+        });
+    }
 
-    Ok(ImageAttachment {
-        name: "clipboard-screenshot.png".to_string(),
-        mime_type: "image/png".to_string(),
-        data_base64: base64::engine::general_purpose::STANDARD.encode(png_bytes.as_slice()),
-        size_bytes: png_bytes.len(),
-    })
+    if let Ok(text) = clipboard.get_text() {
+        if let Some(path) = extract_image_path_from_clipboard_text(&text) {
+            return load_image_attachment_from_path(&path);
+        }
+    }
+
+    Err("Clipboard does not currently contain an image.".to_string())
+}
+
+fn extract_image_path_from_clipboard_text(text: &str) -> Option<PathBuf> {
+    for line in text.lines() {
+        let candidate = line.trim().trim_matches('\0');
+        if candidate.is_empty() {
+            continue;
+        }
+
+        let normalized = candidate
+            .strip_prefix("file://")
+            .unwrap_or(candidate)
+            .replace("%20", " ");
+        let path = PathBuf::from(normalized);
+        if path.exists() && infer_image_mime(&path).is_some() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn infer_image_mime(path: &Path) -> Option<&'static str> {
