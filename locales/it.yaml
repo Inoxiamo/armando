@@ -2,6 +2,7 @@ code: it
 name: Italiano
 strings:
   app.backend: "Backend"
+  app.prompt: "Prompt"
   app.generic_mode: "Modalita domanda generica"
   app.session_chat_mode: "Mantieni sessione chat"
   app.prompt_hint: "Scrivi qui il prompt..."
@@ -43,6 +44,8 @@ strings:
   app.settings_open: "Apri impostazioni"
   app.settings_save_ok: "Impostazioni salvate."
   app.settings_save_error: "Impossibile salvare le impostazioni: {error}"
+  app.editor_grow: "Aumenta altezza {section}"
+  app.editor_shrink: "Riduci altezza {section}"
   settings.language: "Lingua"
   settings.theme: "Tema"
   settings.default_backend: "Backend predefinito"

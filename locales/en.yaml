@@ -2,6 +2,7 @@ code: en
 name: English
 strings:
   app.backend: "Backend"
+  app.prompt: "Prompt"
   app.generic_mode: "Generic question mode"
   app.session_chat_mode: "Keep chat session"
   app.prompt_hint: "Write your prompt here..."
@@ -43,6 +44,8 @@ strings:
   app.settings_open: "Open settings"
   app.settings_save_ok: "Settings saved."
   app.settings_save_error: "Could not save settings: {error}"
+  app.editor_grow: "Increase {section} height"
+  app.editor_shrink: "Decrease {section} height"
   settings.language: "Language"
   settings.theme: "Theme"
   settings.default_backend: "Default backend"

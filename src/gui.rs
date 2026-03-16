@@ -69,6 +69,8 @@ pub struct AiPopupApp {
     dictation_status: Option<String>,
     voice_recording: Option<VoiceRecording>,
     prompt_focus_initialized: bool,
+    prompt_editor_height: f32,
+    response_editor_height: f32,
     generic_question_mode: bool,
     session_chat_enabled: bool,
     session_conversation: Vec<ConversationTurn>,
@@ -145,6 +147,8 @@ impl AiPopupApp {
             dictation_status: None,
             voice_recording: None,
             prompt_focus_initialized: false,
+            prompt_editor_height: 280.0,
+            response_editor_height: 230.0,
             generic_question_mode: false,
             session_chat_enabled: false,
             session_conversation: Vec::new(),
@@ -736,6 +740,8 @@ impl eframe::App for AiPopupApp {
                         let generic_mode_label = self.tr("app.generic_mode");
                         let session_chat_label = self.tr("app.session_chat_mode");
                         let settings_open_label = self.tr("app.settings_open");
+                        let prompt_section_label = self.tr("app.prompt");
+                        let response_section_label = self.tr("app.response");
 
                         ui.horizontal(|ui| {
                             ui.label(muted_label(&backend_label, self.theme.weak_text_color));
@@ -789,14 +795,109 @@ impl eframe::App for AiPopupApp {
                         });
                         ui.add_space(10.0);
 
+                        ui.horizontal(|ui| {
+                            ui.label(section_label(&prompt_section_label, self.theme.text_color));
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let send_clicked = ui
+                                        .add_enabled(
+                                            !self.is_loading,
+                                            icon_action_button("➤", self.theme.accent_color),
+                                        )
+                                        .on_hover_text(self.tr("app.send"))
+                                        .clicked();
+                                    if send_clicked {
+                                        self.submit_prompt(ctx);
+                                    }
+
+                                    if !self.attachments.is_empty()
+                                        && ui
+                                            .add(icon_action_button(
+                                                "✕",
+                                                self.theme.panel_fill_soft,
+                                            ))
+                                            .on_hover_text(self.tr("app.clear_images"))
+                                            .clicked()
+                                    {
+                                        self.clear_attachments();
+                                    }
+
+                                    let voice_icon = if self.voice_recording.is_some() {
+                                        "■"
+                                    } else {
+                                        "🎙"
+                                    };
+                                    let voice_label = if self.voice_recording.is_some() {
+                                        self.tr("app.voice_stop")
+                                    } else {
+                                        self.tr("app.voice_start")
+                                    };
+                                    if ui
+                                        .add(icon_action_button(
+                                            voice_icon,
+                                            self.theme.panel_fill_soft,
+                                        ))
+                                        .on_hover_text(voice_label)
+                                        .clicked()
+                                    {
+                                        self.toggle_dictation(ctx);
+                                    }
+
+                                    if ui
+                                        .add(icon_action_button("🖼", self.theme.panel_fill_soft))
+                                        .on_hover_text(self.tr("app.paste_image"))
+                                        .clicked()
+                                    {
+                                        self.attach_image_from_clipboard();
+                                    }
+
+                                    if ui
+                                        .add(icon_action_button("📎", self.theme.panel_fill_soft))
+                                        .on_hover_text(self.tr("app.attach_image"))
+                                        .clicked()
+                                    {
+                                        self.attach_image_from_file();
+                                    }
+
+                                    if ui
+                                        .add(icon_action_button("＋", self.theme.panel_fill_soft))
+                                        .on_hover_text(self.tr_with(
+                                            "app.editor_grow",
+                                            &[("section", prompt_section_label.clone())],
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.prompt_editor_height =
+                                            (self.prompt_editor_height + 60.0).clamp(160.0, 720.0);
+                                    }
+
+                                    if ui
+                                        .add(icon_action_button("－", self.theme.panel_fill_soft))
+                                        .on_hover_text(self.tr_with(
+                                            "app.editor_shrink",
+                                            &[("section", prompt_section_label.clone())],
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.prompt_editor_height =
+                                            (self.prompt_editor_height - 60.0).clamp(160.0, 720.0);
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(6.0);
+
                         let prompt_id = ui.make_persistent_id("prompt_input");
                         let prompt_hint = self.tr("app.prompt_hint");
+                        let prompt_rows =
+                            ((self.prompt_editor_height / 22.0).round() as usize).clamp(4, 28);
                         let input_output = input_frame(ctx, self.theme.panel_fill).show(ui, |ui| {
                             egui::TextEdit::multiline(&mut self.prompt)
                                 .id(prompt_id)
                                 .hint_text(prompt_hint)
                                 .desired_width(f32::INFINITY)
-                                .desired_rows(4)
+                                .desired_rows(prompt_rows)
                                 .show(ui)
                         });
                         let input_output = input_output.inner;
@@ -837,55 +938,6 @@ impl eframe::App for AiPopupApp {
                             self.auto_copy_close_after_response = true;
                             self.submit_prompt(ctx);
                         }
-
-                        ui.add_space(8.0);
-                        ui.horizontal_wrapped(|ui| {
-                            if ui
-                                .add(secondary_action_button(
-                                    &self.tr("app.attach_image"),
-                                    self.theme.panel_fill_soft,
-                                ))
-                                .clicked()
-                            {
-                                self.attach_image_from_file();
-                            }
-
-                            if ui
-                                .add(secondary_action_button(
-                                    &self.tr("app.paste_image"),
-                                    self.theme.panel_fill_soft,
-                                ))
-                                .clicked()
-                            {
-                                self.attach_image_from_clipboard();
-                            }
-
-                            let voice_label = if self.voice_recording.is_some() {
-                                self.tr("app.voice_stop")
-                            } else {
-                                self.tr("app.voice_start")
-                            };
-                            if ui
-                                .add(secondary_action_button(
-                                    &voice_label,
-                                    self.theme.panel_fill_soft,
-                                ))
-                                .clicked()
-                            {
-                                self.toggle_dictation(ctx);
-                            }
-
-                            if !self.attachments.is_empty()
-                                && ui
-                                    .add(secondary_action_button(
-                                        &self.tr("app.clear_images"),
-                                        self.theme.panel_fill,
-                                    ))
-                                    .clicked()
-                            {
-                                self.clear_attachments();
-                            }
-                        });
 
                         if !self.attachments.is_empty() {
                             ui.add_space(6.0);
@@ -940,68 +992,6 @@ impl eframe::App for AiPopupApp {
                             );
                         });
 
-                        ui.add_space(10.0);
-                        ui.horizontal_wrapped(|ui| {
-                            let history_count = self.history_entries.len();
-                            let history_label = if self.show_history {
-                                self.tr_with(
-                                    "app.hide_history",
-                                    &[("count", history_count.to_string())],
-                                )
-                            } else {
-                                self.tr_with(
-                                    "app.show_history",
-                                    &[("count", history_count.to_string())],
-                                )
-                            };
-
-                            if ui
-                                .add_enabled(
-                                    !self.is_loading,
-                                    primary_action_button(
-                                        &self.tr("app.send"),
-                                        self.theme.accent_color,
-                                        self.theme.accent_text_color,
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                self.submit_prompt(ctx);
-                            }
-
-                            if ui
-                                .add_enabled(
-                                    !self.response.is_empty(),
-                                    secondary_action_button(
-                                        &self.tr("app.copy_response"),
-                                        self.theme.panel_fill,
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    let _ = clipboard.set_text(self.response.clone());
-                                }
-                            }
-
-                            if ui
-                                .add_enabled(
-                                    self.config.history.enabled,
-                                    toggle_action_button(
-                                        &history_label,
-                                        if self.show_history {
-                                            self.theme.panel_fill_soft
-                                        } else {
-                                            self.theme.panel_fill
-                                        },
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                self.set_history_visibility(ctx, !self.show_history);
-                            }
-                        });
-
                         if let Some(path) = &self.config.loaded_from {
                             ui.add_space(8.0);
                             ui.label(
@@ -1024,7 +1014,7 @@ impl eframe::App for AiPopupApp {
                         ui.add_space(14.0);
                         ui.horizontal(|ui| {
                             ui.label(section_label(
-                                &self.tr("app.response"),
+                                &response_section_label,
                                 self.theme.text_color,
                             ));
                             if self.is_loading {
@@ -1035,21 +1025,93 @@ impl eframe::App for AiPopupApp {
                                         .color(self.theme.weak_text_color),
                                 );
                             }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let history_count = self.history_entries.len();
+                                    let history_label = if self.show_history {
+                                        self.tr_with(
+                                            "app.hide_history",
+                                            &[("count", history_count.to_string())],
+                                        )
+                                    } else {
+                                        self.tr_with(
+                                            "app.show_history",
+                                            &[("count", history_count.to_string())],
+                                        )
+                                    };
+
+                                    if ui
+                                        .add_enabled(
+                                            self.config.history.enabled,
+                                            icon_action_button(
+                                                if self.show_history { "🕘" } else { "☰" },
+                                                if self.show_history {
+                                                    self.theme.panel_fill_soft
+                                                } else {
+                                                    self.theme.panel_fill
+                                                },
+                                            ),
+                                        )
+                                        .on_hover_text(history_label)
+                                        .clicked()
+                                    {
+                                        self.set_history_visibility(ctx, !self.show_history);
+                                    }
+
+                                    if ui
+                                        .add_enabled(
+                                            !self.response.is_empty(),
+                                            icon_action_button("⧉", self.theme.panel_fill_soft),
+                                        )
+                                        .on_hover_text(self.tr("app.copy_response"))
+                                        .clicked()
+                                    {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(self.response.clone());
+                                        }
+                                    }
+
+                                    if ui
+                                        .add(icon_action_button("＋", self.theme.panel_fill_soft))
+                                        .on_hover_text(self.tr_with(
+                                            "app.editor_grow",
+                                            &[("section", response_section_label.clone())],
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.response_editor_height = (self.response_editor_height
+                                            + 60.0)
+                                            .clamp(140.0, 720.0);
+                                    }
+
+                                    if ui
+                                        .add(icon_action_button("－", self.theme.panel_fill_soft))
+                                        .on_hover_text(self.tr_with(
+                                            "app.editor_shrink",
+                                            &[("section", response_section_label.clone())],
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.response_editor_height = (self.response_editor_height
+                                            - 60.0)
+                                            .clamp(140.0, 720.0);
+                                    }
+                                },
+                            );
                         });
                         ui.add_space(6.0);
 
                         input_frame(ctx, self.theme.panel_fill).show(ui, |ui| {
-                            let response_height = if self.show_history { 160.0 } else { 230.0 };
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false; 2])
-                                .max_height(response_height)
-                                .show(ui, |ui| {
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut self.response.as_str())
-                                            .desired_width(f32::INFINITY)
-                                            .font(egui::TextStyle::Monospace),
-                                    );
-                                });
+                            let response_rows = ((self.response_editor_height / 22.0).round()
+                                as usize)
+                                .clamp(4, 28);
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.response.as_str())
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(response_rows)
+                                    .font(egui::TextStyle::Monospace),
+                            );
                         });
 
                         if self.show_history {
@@ -1349,12 +1411,12 @@ fn secondary_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::But
         .min_size(egui::vec2(118.0, 34.0))
 }
 
-fn toggle_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::Button<'a> {
-    egui::Button::new(egui::RichText::new(label).strong())
+fn icon_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::Button<'a> {
+    egui::Button::new(egui::RichText::new(label).strong().size(16.0))
         .fill(fill)
         .stroke(egui::Stroke::NONE)
         .rounding(egui::Rounding::same(10.0))
-        .min_size(egui::vec2(136.0, 34.0))
+        .min_size(egui::vec2(34.0, 34.0))
 }
 
 fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -> egui::Frame {
