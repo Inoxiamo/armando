@@ -11,6 +11,9 @@ theme:
 ui:
   language: "it"
 
+history:
+  enabled: false
+
 logging:
   enabled: false
 

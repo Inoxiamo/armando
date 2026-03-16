@@ -110,9 +110,13 @@ impl AiPopupApp {
             }
         }
 
-        let (history_entries, history_error) = match history::recent_entries() {
-            Ok(entries) => (entries, None),
-            Err(err) => (Vec::new(), Some(err.to_string())),
+        let (history_entries, history_error) = if config.history.enabled {
+            match history::recent_entries() {
+                Ok(entries) => (entries, None),
+                Err(err) => (Vec::new(), Some(err.to_string())),
+            }
+        } else {
+            (Vec::new(), None)
         };
 
         let fallback_theme_name = config.theme.name.clone();
@@ -168,8 +172,11 @@ impl AiPopupApp {
                 Ok(text) => {
                     self.response = text;
                     if let Some((backend, prompt)) = self.pending_submission.take() {
-                        if let Ok(entry) = history::new_entry(&backend, &prompt, &self.response) {
-                            self.session_history_entries.insert(0, entry);
+                        if self.config.history.enabled {
+                            if let Ok(entry) = history::new_entry(&backend, &prompt, &self.response)
+                            {
+                                self.session_history_entries.insert(0, entry);
+                            }
                         }
                         if self.session_chat_enabled {
                             self.session_conversation.push(ConversationTurn {
@@ -282,6 +289,15 @@ impl AiPopupApp {
     }
 
     fn reload_history(&mut self) {
+        if !self.config.history.enabled {
+            self.history_entries.clear();
+            self.session_history_entries.clear();
+            self.selected_history_entries.clear();
+            self.history_error = None;
+            self.history_action_error = None;
+            return;
+        }
+
         match history::recent_entries() {
             Ok(entries) => {
                 self.history_entries = entries;
@@ -310,6 +326,9 @@ impl AiPopupApp {
     }
 
     fn delete_selected_history_entries(&mut self) {
+        if !self.config.history.enabled {
+            return;
+        }
         if self.selected_history_entries.is_empty() {
             return;
         }
@@ -329,6 +348,9 @@ impl AiPopupApp {
     }
 
     fn select_all_visible_history_entries(&mut self) {
+        if !self.config.history.enabled {
+            return;
+        }
         for entry in &self.session_history_entries {
             self.selected_history_entries
                 .insert(history::entry_id(entry));
@@ -340,6 +362,9 @@ impl AiPopupApp {
     }
 
     fn delete_all_visible_history_entries(&mut self) {
+        if !self.config.history.enabled {
+            return;
+        }
         let mut ids: Vec<String> = self
             .session_history_entries
             .iter()
@@ -371,6 +396,9 @@ impl AiPopupApp {
     }
 
     fn filtered_history_entries(&self) -> Vec<HistoryEntry> {
+        if !self.config.history.enabled {
+            return Vec::new();
+        }
         let query = self.history_filter_query.trim().to_lowercase();
         self.history_entries
             .iter()
@@ -388,7 +416,7 @@ impl AiPopupApp {
     }
 
     fn set_history_visibility(&mut self, ctx: &egui::Context, visible: bool) {
-        self.show_history = visible;
+        self.show_history = self.config.history.enabled && visible;
         if self.show_history {
             self.reload_history();
         }
@@ -893,14 +921,17 @@ impl eframe::App for AiPopupApp {
                             }
 
                             if ui
-                                .add(toggle_action_button(
-                                    &history_label,
-                                    if self.show_history {
-                                        self.theme.panel_fill_soft
-                                    } else {
-                                        self.theme.panel_fill
-                                    },
-                                ))
+                                .add_enabled(
+                                    self.config.history.enabled,
+                                    toggle_action_button(
+                                        &history_label,
+                                        if self.show_history {
+                                            self.theme.panel_fill_soft
+                                        } else {
+                                            self.theme.panel_fill
+                                        },
+                                    ),
+                                )
                                 .clicked()
                             {
                                 self.set_history_visibility(ctx, !self.show_history);
@@ -1435,6 +1466,29 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
                     app.config.auto_read_selection = auto_read;
                     app.persist_settings();
                 }
+
+                ui.add_space(12.0);
+                ui.label(section_label(
+                    &app.tr("settings.history_debug"),
+                    app.theme.text_color,
+                ));
+
+                let mut history_enabled = app.config.history.enabled;
+                if ui
+                    .checkbox(&mut history_enabled, app.tr("settings.history_enabled"))
+                    .changed()
+                {
+                    app.config.history.enabled = history_enabled;
+                    if !history_enabled {
+                        app.show_history = false;
+                    }
+                    app.reload_history();
+                    app.persist_settings();
+                }
+                ui.label(muted_label(
+                    &app.tr("settings.history_warning"),
+                    app.theme.weak_text_color,
+                ));
 
                 ui.add_space(8.0);
                 let mut debug_logging = app.config.logging.enabled;

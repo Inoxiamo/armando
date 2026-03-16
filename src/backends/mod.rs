@@ -70,8 +70,10 @@ pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: Pro
     match res {
         Ok(text) => {
             logging::log_success(config, backend, input, &text);
-            if let Ok(entry) = history::new_entry(backend, &input.prompt, &text) {
-                let _ = history::append_entry(entry);
+            if config.history.enabled {
+                if let Ok(entry) = history::new_entry(backend, &input.prompt, &text) {
+                    let _ = history::append_entry(entry);
+                }
             }
             text
         }

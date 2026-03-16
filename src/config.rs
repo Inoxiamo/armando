@@ -47,6 +47,12 @@ pub struct LoggingConfig {
     pub enabled: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct HistoryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
@@ -56,6 +62,12 @@ impl Default for UiConfig {
 }
 
 impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
+impl Default for HistoryConfig {
     fn default() -> Self {
         Self { enabled: false }
     }
@@ -83,6 +95,8 @@ pub struct Config {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub ui: UiConfig,
+    #[serde(default)]
+    pub history: HistoryConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
     pub gemini: Option<GeminiConfig>,
@@ -173,6 +187,7 @@ mod tests {
         assert!(config.auto_read_selection);
         assert_eq!(config.theme.name, "default-dark");
         assert_eq!(config.ui.language, "en");
+        assert!(!config.history.enabled);
         assert!(!config.logging.enabled);
     }
 }

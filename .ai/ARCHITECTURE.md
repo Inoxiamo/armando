@@ -19,10 +19,10 @@
   Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, optional in-memory chat session state, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
 
 - `src/config.rs`
-  Defines the YAML configuration schema, persistence behavior, and config path resolution, including opt-in debug logging.
+  Defines the YAML configuration schema, persistence behavior, and config path resolution, including opt-in local history and debug logging.
 
 - `src/history.rs`
-  Manages local history persistence, 7-day retention, selective deletion, and `history.jsonl` lookup.
+  Manages opt-in local history persistence, 7-day retention, selective deletion, and `history.jsonl` lookup.
 
 - `src/theme.rs`
   Loads external theme files, discovers available presets, and resolves the color palette used by the UI.
@@ -61,9 +61,9 @@
 9. The user submits a prompt
 10. An async task queries the selected backend
 11. If debug logging is enabled, the app appends request and outcome events to a local JSONL log file
-12. Successful responses are appended to local history
+12. If local history is enabled, successful responses are appended to local history
 13. The response is rendered in the popup
-14. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
+14. The user can change theme, language, backend, models, credentials, history, and debug settings from the settings panel with immediate persistence
 15. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
 
 ## UI Structure
