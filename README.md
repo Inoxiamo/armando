@@ -85,3 +85,20 @@ The ChatGPT backend uses OpenAI's Responses API.
 ## Release Pipeline
 
 The repository includes [release.yml](/home/simone/work/test-popup-ai/.github/workflows/release.yml), which builds release artifacts for Linux, macOS, and Windows, bundles the shipped assets, generates checksums, and publishes release assets when a tag such as `v1.0.0` is pushed.
+
+## Test Automation
+
+The repository also includes [ci.yml](/home/simone/work/test-popup-ai/.github/workflows/ci.yml), which runs formatting checks plus unit, integration, and functional packaging tests inside a Linux Docker container.
+
+Run the same containerized flow locally with:
+
+```bash
+docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
+docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/run-container-tests.sh
+```
+
+Container test runs publish:
+
+- logs under `target/test-artifacts/`
+- a Linux release bundle under `target/dist/`
+- checksum files for the generated bundle

@@ -34,6 +34,8 @@
 - Voice dictation flow with microphone recording and OpenAI transcription
 - Multimodal request forwarding for ChatGPT, Claude, Gemini, and Ollama image-capable models
 - Regression-oriented unit tests for prompt preparation, tag parsing, history retention, config loading, and theme loading
+- Integration tests for config round-trips, resource discovery, and release bundle/install scripts
+- Containerized Linux test runner for formatting, unit tests, integration tests, functional packaging checks, and Linux release bundle generation
 - Persistent local history with 7-day retention
 - History filters by backend and text
 - Fast reuse and copy actions from history entries
@@ -67,6 +69,7 @@
 - Text on accent buttons is configurable through `accent_text_color` in the theme file
 - Local installation places the binary, shipped themes, shipped locales, desktop icon, and `.desktop` launcher entry in the user profile
 - Downloaded GitHub release bundles now include bundled assets, install scripts, and checksums so other users can extract and install them directly
+- GitHub Actions now validate the Linux flow in Docker before release packaging and upload both test logs and Linux bundle artifacts
 - Default assistant behavior prefers output that can be reapplied immediately
 - In `Generic question` mode, the prompt is treated as a direct question rather than text to rewrite
 - In `Generic question` mode, the `CMD` tag requests only the final command; without `CMD`, the answer is formatted as Markdown

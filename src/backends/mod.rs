@@ -663,7 +663,9 @@ fn built_in_tag_instruction(tag: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ClaudeConfig, Config, ThemeConfig, UiConfig};
+    use crate::config::{
+        ClaudeConfig, Config, HistoryConfig, LoggingConfig, ThemeConfig, UiConfig,
+    };
 
     fn test_config() -> Config {
         Config {
@@ -675,6 +677,8 @@ mod tests {
             default_backend: "ollama".to_string(),
             theme: ThemeConfig::default(),
             ui: UiConfig::default(),
+            history: HistoryConfig::default(),
+            logging: LoggingConfig::default(),
             gemini: None,
             chatgpt: None,
             claude: Some(ClaudeConfig {

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-container:
+    name: Test In Linux Container
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test runner image
+        run: docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
+
+      - name: Run unit, integration, and functional tests
+        run: |
+          chmod +x scripts/run-container-tests.sh
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            armando-test-runner \
+            bash scripts/run-container-tests.sh "ci-${{ github.sha }}"
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: armando-test-artifacts
+          path: target/test-artifacts
+
+      - name: Upload Linux release bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: armando-linux-bundle
+          path: |
+            target/dist/armando-ci-*.tar.gz
+            target/dist/armando-ci-*.tar.gz.sha256

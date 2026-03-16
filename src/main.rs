@@ -1,17 +1,9 @@
-mod app_paths;
-mod backends;
-mod config;
-mod gui;
-mod history;
-mod i18n;
-mod logging;
-mod theme;
-
+use armando::{config, gui, theme};
 use eframe::egui;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
-use crate::theme::load_theme;
+use theme::load_theme;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();

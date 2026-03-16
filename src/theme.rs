@@ -124,7 +124,7 @@ fn parse_hex_color(value: &str) -> anyhow::Result<egui::Color32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ThemeConfig, UiConfig};
+    use crate::config::{HistoryConfig, LoggingConfig, ThemeConfig, UiConfig};
 
     #[test]
     fn resolve_theme_definition_parses_all_colors() {
@@ -211,6 +211,8 @@ danger_color: \"#A1A2A3\"\n",
                 path: Some(theme_path.clone()),
             },
             ui: UiConfig::default(),
+            history: HistoryConfig::default(),
+            logging: LoggingConfig::default(),
             gemini: None,
             chatgpt: None,
             claude: None,

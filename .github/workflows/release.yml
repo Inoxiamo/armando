@@ -19,8 +19,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  test-container:
+    name: Validate In Linux Container
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test runner image
+        run: docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
+
+      - name: Run unit, integration, and functional tests
+        run: |
+          chmod +x scripts/run-container-tests.sh
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            armando-test-runner \
+            bash scripts/run-container-tests.sh "release-${{ github.sha }}"
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: armando-release-test-artifacts
+          path: target/test-artifacts
+
   build:
     name: Build ${{ matrix.label }}
+    needs: test-container
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
