@@ -103,15 +103,20 @@ fn load_toolbar_icon_textures(ctx: &egui::Context) -> HashMap<ToolbarIcon, egui:
 }
 
 fn render_svg_icon(svg: &str) -> Result<egui::ColorImage, String> {
+    const TARGET_SIZE: u32 = 96;
+
     let options = resvg::usvg::Options::default();
     let tree =
         resvg::usvg::Tree::from_str(svg, &options).map_err(|err| format!("Invalid SVG: {err}"))?;
     let size = tree.size().to_int_size();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(TARGET_SIZE, TARGET_SIZE)
         .ok_or_else(|| "Could not allocate pixmap for SVG icon.".to_string())?;
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::default(),
+        resvg::tiny_skia::Transform::from_scale(
+            TARGET_SIZE as f32 / size.width() as f32,
+            TARGET_SIZE as f32 / size.height() as f32,
+        ),
         &mut pixmap.as_mut(),
     );
 
@@ -125,7 +130,7 @@ fn render_svg_icon(svg: &str) -> Result<egui::ColorImage, String> {
     }
 
     Ok(egui::ColorImage::from_rgba_unmultiplied(
-        [size.width() as usize, size.height() as usize],
+        [TARGET_SIZE as usize, TARGET_SIZE as usize],
         &rgba,
     ))
 }
