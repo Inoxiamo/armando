@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
+use crate::app_paths;
 use crate::config::Config;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -44,7 +45,7 @@ pub fn load_theme(config: &Config) -> anyhow::Result<ResolvedTheme> {
         return load_theme_file(&resolved);
     }
 
-    for path in candidate_theme_paths(&theme_cfg.name, config.loaded_from.as_deref()) {
+    for path in app_paths::candidate_theme_paths(&theme_cfg.name, config.loaded_from.as_deref())? {
         if path.exists() {
             return load_theme_file(&path);
         }
@@ -54,6 +55,20 @@ pub fn load_theme(config: &Config) -> anyhow::Result<ResolvedTheme> {
         "Theme '{}' not found. Looked for an external theme file in the standard themes directories.",
         theme_cfg.name
     )
+}
+
+pub fn load_theme_by_name(name: &str, loaded_from: Option<&Path>) -> anyhow::Result<ResolvedTheme> {
+    for path in app_paths::candidate_theme_paths(name, loaded_from)? {
+        if path.exists() {
+            return load_theme_file(&path);
+        }
+    }
+
+    anyhow::bail!("Theme '{}' not found.", name)
+}
+
+pub fn available_theme_names() -> anyhow::Result<Vec<String>> {
+    app_paths::discover_named_files("themes", "yaml")
 }
 
 fn load_theme_file(path: &Path) -> anyhow::Result<ResolvedTheme> {
@@ -74,41 +89,6 @@ fn resolve_relative_to_config(path: &Path, loaded_from: Option<&Path>) -> PathBu
     }
 
     path.to_path_buf()
-}
-
-fn candidate_theme_paths(name: &str, loaded_from: Option<&Path>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    let file_name = format!("{}.yaml", name);
-
-    if let Some(config_path) = loaded_from {
-        if let Some(parent) = config_path.parent() {
-            paths.push(parent.join("themes").join(&file_name));
-        }
-    }
-
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(parent) = exe_path.parent() {
-            paths.push(parent.join("themes").join(&file_name));
-            if let Some(grandparent) = parent.parent().and_then(|p| p.parent()) {
-                paths.push(grandparent.join("themes").join(&file_name));
-            }
-        }
-    }
-
-    if let Ok(current_dir) = std::env::current_dir() {
-        paths.push(current_dir.join("themes").join(&file_name));
-    }
-
-    if let Some(config_dir) = dirs::config_dir() {
-        paths.push(
-            config_dir
-                .join("test-popup-ai")
-                .join("themes")
-                .join(&file_name),
-        );
-    }
-
-    paths
 }
 
 impl ThemeDefinition {
@@ -144,7 +124,7 @@ fn parse_hex_color(value: &str) -> anyhow::Result<egui::Color32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ThemeConfig;
+    use crate::config::{ThemeConfig, UiConfig};
 
     #[test]
     fn resolve_theme_definition_parses_all_colors() {
@@ -184,28 +164,24 @@ mod tests {
 
     #[test]
     fn resolve_relative_to_config_uses_config_parent() {
-        let config_path = Path::new("/tmp/test-popup-ai/config.yaml");
+        let config_path = Path::new("/tmp/armando/config.yaml");
         let resolved =
             resolve_relative_to_config(Path::new("themes/custom.yaml"), Some(config_path));
 
-        assert_eq!(
-            resolved,
-            PathBuf::from("/tmp/test-popup-ai/themes/custom.yaml")
-        );
+        assert_eq!(resolved, PathBuf::from("/tmp/armando/themes/custom.yaml"));
     }
 
     #[test]
     fn candidate_theme_paths_include_config_relative_location() {
-        let config_path = Path::new("/tmp/test-popup-ai/config.yaml");
-        let paths = candidate_theme_paths("nerv-hud", Some(config_path));
+        let config_path = Path::new("/tmp/armando/config.yaml");
+        let paths = app_paths::candidate_theme_paths("nerv-hud", Some(config_path)).unwrap();
 
-        assert!(paths.contains(&PathBuf::from("/tmp/test-popup-ai/themes/nerv-hud.yaml")));
+        assert!(paths.contains(&PathBuf::from("/tmp/armando/themes/nerv-hud.yaml")));
     }
 
     #[test]
     fn load_theme_uses_explicit_path() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("test-popup-ai-theme-{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("armando-theme-{}", std::process::id()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let theme_path = temp_dir.join("custom.yaml");
         std::fs::write(
@@ -227,17 +203,17 @@ danger_color: \"#A1A2A3\"\n",
         .unwrap();
 
         let config = Config {
-            hotkey: "<ctrl>+<space>".to_string(),
             aliases: None,
             auto_read_selection: true,
-            paste_response_shortcut: "<ctrl>+<enter>".to_string(),
             default_backend: "ollama".to_string(),
             theme: ThemeConfig {
                 name: "ignored".to_string(),
                 path: Some(theme_path.clone()),
             },
+            ui: UiConfig::default(),
             gemini: None,
             chatgpt: None,
+            claude: None,
             ollama: None,
             loaded_from: None,
         };

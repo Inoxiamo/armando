@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: armando
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            binary_name: armando
+            archive_type: tar.gz
+          - os: macos-latest
+            label: macos-arm64
+            target: aarch64-apple-darwin
+            binary_name: armando
+            archive_type: tar.gz
+          - os: windows-latest
+            label: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            binary_name: armando.exe
+            archive_type: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package Unix bundle
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x scripts/package-release.sh
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          scripts/package-release.sh \
+            "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" \
+            "${{ matrix.target }}" \
+            "${VERSION}"
+
+      - name: Package Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $bundle = "target/dist/${env:APP_NAME}-$version-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "$bundle/configs" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$bundle/themes" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$bundle/locales" | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "$bundle/"
+          Copy-Item "README.md" "$bundle/"
+          Copy-Item "configs/default.yaml" "$bundle/configs/default.yaml"
+          Copy-Item "themes/*.yaml" "$bundle/themes/"
+          Copy-Item "locales/*.yaml" "$bundle/locales/"
+          Compress-Archive -Path "$bundle/*" -DestinationPath "$bundle.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-${{ matrix.label }}
+          path: |
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.tar.gz
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.zip
+
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.tar.gz
+            target/dist/${{ env.APP_NAME }}-*-${{ matrix.target }}.zip

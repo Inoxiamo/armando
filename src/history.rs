@@ -5,6 +5,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
+use crate::app_paths;
+
 const RETENTION_DAYS: i64 = 7;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +30,12 @@ pub fn recent_entries() -> anyhow::Result<Vec<HistoryEntry>> {
     write_entries(&entries)?;
     entries.reverse();
     Ok(entries)
+}
+
+pub fn delete_entries(ids: &[String]) -> anyhow::Result<()> {
+    let mut entries = load_entries()?;
+    entries.retain(|entry| !ids.iter().any(|id| id == &entry_id(entry)));
+    write_entries(&entries)
 }
 
 pub fn history_file_path() -> anyhow::Result<PathBuf> {
@@ -89,14 +97,7 @@ fn write_entries(entries: &[HistoryEntry]) -> anyhow::Result<()> {
 }
 
 fn history_path() -> anyhow::Result<PathBuf> {
-    let base = dirs::data_local_dir()
-        .or_else(dirs::data_dir)
-        .or_else(dirs::config_dir)
-        .ok_or_else(|| {
-            anyhow::anyhow!("Could not determine a writable application data directory")
-        })?;
-
-    Ok(base.join("test-popup-ai").join("history.jsonl"))
+    app_paths::history_file_path()
 }
 
 fn prune_old_entries(entries: &mut Vec<HistoryEntry>) {
@@ -106,6 +107,13 @@ fn prune_old_entries(entries: &mut Vec<HistoryEntry>) {
             .map(|timestamp| timestamp >= cutoff)
             .unwrap_or(false)
     });
+}
+
+pub fn entry_id(entry: &HistoryEntry) -> String {
+    format!(
+        "{}::{}::{}::{}",
+        entry.created_at, entry.backend, entry.prompt, entry.response
+    )
 }
 
 #[cfg(test)]
