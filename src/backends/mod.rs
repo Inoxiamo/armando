@@ -1,4 +1,5 @@
 pub mod chatgpt;
+pub mod claude;
 pub mod gemini;
 pub mod ollama;
 
@@ -6,24 +7,54 @@ use crate::config::Config;
 use crate::history;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    pub name: String,
+    pub mime_type: String,
+    pub data_base64: String,
+    pub size_bytes: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct QueryInput {
+    pub prompt: String,
+    pub images: Vec<ImageAttachment>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptMode {
     TextAssist,
     GenericQuestion,
 }
 
-pub async fn query(backend: &str, prompt: &str, config: &Config, mode: PromptMode) -> String {
-    let prepared_prompt = prepare_prompt(prompt, config, mode);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HealthLevel {
+    Ok,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct HealthCheck {
+    pub backend: String,
+    pub level: HealthLevel,
+    pub summary: String,
+    pub detail: String,
+}
+
+pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: PromptMode) -> String {
+    let prepared_prompt = prepare_prompt(&input.prompt, config, mode, !input.images.is_empty());
     let res = match backend {
-        "chatgpt" => chatgpt::query(&prepared_prompt, config).await,
-        "gemini" => gemini::query(&prepared_prompt, config).await,
-        "ollama" => ollama::query(&prepared_prompt, config).await,
+        "chatgpt" => chatgpt::query(&prepared_prompt, &input.images, config).await,
+        "claude" => claude::query(&prepared_prompt, &input.images, config).await,
+        "gemini" => gemini::query(&prepared_prompt, &input.images, config).await,
+        "ollama" => ollama::query(&prepared_prompt, &input.images, config).await,
         _ => return format!("❌ Unknown backend: {}", backend),
     };
 
     match res {
         Ok(text) => {
-            if let Ok(entry) = history::new_entry(backend, prompt, &text) {
+            if let Ok(entry) = history::new_entry(backend, &input.prompt, &text) {
                 let _ = history::append_entry(entry);
             }
             text
@@ -35,7 +66,177 @@ pub async fn query(backend: &str, prompt: &str, config: &Config, mode: PromptMod
     }
 }
 
-fn prepare_prompt(prompt: &str, config: &Config, mode: PromptMode) -> String {
+pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result<String, String> {
+    chatgpt::transcribe_wav_audio(wav_bytes, config)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+pub fn health_checks(config: &Config) -> Vec<HealthCheck> {
+    vec![
+        health_check_openai(config),
+        health_check_claude(config),
+        health_check_gemini(config),
+        health_check_ollama(config),
+    ]
+}
+
+fn health_check_openai(config: &Config) -> HealthCheck {
+    match &config.chatgpt {
+        Some(chatgpt)
+            if !chatgpt.api_key.is_empty() && chatgpt.api_key != "YOUR_OPENAI_API_KEY" =>
+        {
+            if chatgpt.model.trim().is_empty() {
+                warning(
+                    "chatgpt",
+                    "Model missing",
+                    "OpenAI API key is set, but the model field is empty.",
+                )
+            } else {
+                ok(
+                    "chatgpt",
+                    "Ready",
+                    format!("Configured with model `{}`.", chatgpt.model),
+                )
+            }
+        }
+        Some(_) => error(
+            "chatgpt",
+            "API key missing",
+            "Configure `chatgpt.api_key` to enable OpenAI requests.",
+        ),
+        None => warning(
+            "chatgpt",
+            "Not configured",
+            "No `chatgpt` section found in config.",
+        ),
+    }
+}
+
+fn health_check_claude(config: &Config) -> HealthCheck {
+    match &config.claude {
+        Some(claude)
+            if !claude.api_key.is_empty() && claude.api_key != "YOUR_ANTHROPIC_API_KEY" =>
+        {
+            if claude.model.trim().is_empty() {
+                warning(
+                    "claude",
+                    "Model missing",
+                    "Anthropic API key is set, but the model field is empty.",
+                )
+            } else {
+                ok(
+                    "claude",
+                    "Ready",
+                    format!("Configured with model `{}`.", claude.model),
+                )
+            }
+        }
+        Some(_) => error(
+            "claude",
+            "API key missing",
+            "Configure `claude.api_key` to enable Anthropic requests.",
+        ),
+        None => warning(
+            "claude",
+            "Not configured",
+            "No `claude` section found in config.",
+        ),
+    }
+}
+
+fn health_check_gemini(config: &Config) -> HealthCheck {
+    match &config.gemini {
+        Some(gemini) if !gemini.api_key.is_empty() && gemini.api_key != "YOUR_GEMINI_API_KEY" => {
+            if gemini.model.trim().is_empty() {
+                warning(
+                    "gemini",
+                    "Model missing",
+                    "Gemini API key is set, but the model field is empty.",
+                )
+            } else {
+                ok(
+                    "gemini",
+                    "Ready",
+                    format!("Configured with model `{}`.", gemini.model),
+                )
+            }
+        }
+        Some(_) => error(
+            "gemini",
+            "API key missing",
+            "Configure `gemini.api_key` to enable Gemini requests.",
+        ),
+        None => warning(
+            "gemini",
+            "Not configured",
+            "No `gemini` section found in config.",
+        ),
+    }
+}
+
+fn health_check_ollama(config: &Config) -> HealthCheck {
+    match &config.ollama {
+        Some(ollama) => {
+            if ollama.base_url.trim().is_empty() {
+                error(
+                    "ollama",
+                    "Base URL missing",
+                    "Configure `ollama.base_url` to reach the Ollama server.",
+                )
+            } else if ollama.model.trim().is_empty() {
+                warning(
+                    "ollama",
+                    "Model missing",
+                    "Ollama base URL is set, but the model field is empty.",
+                )
+            } else {
+                ok(
+                    "ollama",
+                    "Ready",
+                    format!(
+                        "Configured with `{}` on `{}`.",
+                        ollama.model, ollama.base_url
+                    ),
+                )
+            }
+        }
+        None => warning(
+            "ollama",
+            "Not configured",
+            "No `ollama` section found in config.",
+        ),
+    }
+}
+
+fn ok(backend: &str, summary: &str, detail: String) -> HealthCheck {
+    HealthCheck {
+        backend: backend.to_string(),
+        level: HealthLevel::Ok,
+        summary: summary.to_string(),
+        detail,
+    }
+}
+
+fn warning(backend: &str, summary: &str, detail: &str) -> HealthCheck {
+    HealthCheck {
+        backend: backend.to_string(),
+        level: HealthLevel::Warning,
+        summary: summary.to_string(),
+        detail: detail.to_string(),
+    }
+}
+
+fn error(backend: &str, summary: &str, detail: &str) -> HealthCheck {
+    HealthCheck {
+        backend: backend.to_string(),
+        level: HealthLevel::Error,
+        summary: summary.to_string(),
+        detail: detail.to_string(),
+    }
+}
+
+fn prepare_prompt(prompt: &str, config: &Config, mode: PromptMode, has_images: bool) -> String {
     let (expanded_prompt, detected_tags) = expand_tags(prompt, config.aliases.as_ref());
     let mut instructions = match mode {
         PromptMode::TextAssist => vec![
@@ -54,6 +255,13 @@ fn prepare_prompt(prompt: &str, config: &Config, mode: PromptMode) -> String {
             "Mantieni una risposta diretta, utile e senza premesse superflue.".to_string(),
         ],
     };
+
+    if has_images {
+        instructions.push(
+            "Se sono presenti immagini o screenshot allegati, usali come contesto visivo per leggere testo, capire interfacce, estrarre dettagli e migliorare la risposta."
+                .to_string(),
+        );
+    }
 
     if mode == PromptMode::GenericQuestion {
         if detected_tags.iter().any(|tag| tag == "CMD") {
@@ -75,10 +283,17 @@ fn prepare_prompt(prompt: &str, config: &Config, mode: PromptMode) -> String {
         ));
     }
 
+    let effective_prompt = if expanded_prompt.trim().is_empty() && has_images {
+        "Analizza gli allegati immagine o screenshot e rispondi in modo utile, diretto e concreto."
+            .to_string()
+    } else {
+        expanded_prompt.trim().to_string()
+    };
+
     format!(
         "{}\n\nRichiesta utente:\n{}",
         instructions.join("\n"),
-        expanded_prompt.trim()
+        effective_prompt
     )
 }
 
@@ -184,21 +399,24 @@ fn built_in_tag_instruction(tag: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, ThemeConfig};
+    use crate::config::{ClaudeConfig, Config, ThemeConfig, UiConfig};
 
     fn test_config() -> Config {
         Config {
-            hotkey: "<ctrl>+<space>".to_string(),
             aliases: Some(HashMap::from([(
                 "TITLE".to_string(),
                 "Trasforma il testo in un titolo breve.".to_string(),
             )])),
             auto_read_selection: true,
-            paste_response_shortcut: "<ctrl>+<enter>".to_string(),
             default_backend: "ollama".to_string(),
             theme: ThemeConfig::default(),
+            ui: UiConfig::default(),
             gemini: None,
             chatgpt: None,
+            claude: Some(ClaudeConfig {
+                api_key: String::new(),
+                model: "claude-3-5-sonnet-latest".to_string(),
+            }),
             ollama: None,
             loaded_from: None,
         }

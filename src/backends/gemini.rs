@@ -1,8 +1,9 @@
+use crate::backends::ImageAttachment;
 use crate::config::Config;
 use anyhow::{anyhow, Result};
 use serde_json::json;
 
-pub async fn query(prompt: &str, config: &Config) -> Result<String> {
+pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) -> Result<String> {
     let (api_key, model) = if let Some(ref c) = config.gemini {
         (c.api_key.clone(), c.model.clone())
     } else {
@@ -22,9 +23,19 @@ pub async fn query(prompt: &str, config: &Config) -> Result<String> {
         model, api_key
     );
 
+    let mut parts = vec![json!({ "text": prompt })];
+    for image in images {
+        parts.push(json!({
+            "inline_data": {
+                "mime_type": image.mime_type,
+                "data": image.data_base64
+            }
+        }));
+    }
+
     let payload = json!({
         "contents": [{
-            "parts": [{"text": prompt}]
+            "parts": parts
         }]
     });
 

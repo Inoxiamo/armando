@@ -1,8 +1,10 @@
+use crate::backends::ImageAttachment;
 use crate::config::Config;
 use anyhow::{anyhow, Result};
+use reqwest::multipart;
 use serde_json::json;
 
-pub async fn query(prompt: &str, config: &Config) -> Result<String> {
+pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) -> Result<String> {
     let (api_key, model) = if let Some(ref c) = config.chatgpt {
         (c.api_key.clone(), c.model.clone())
     } else {
@@ -18,9 +20,22 @@ pub async fn query(prompt: &str, config: &Config) -> Result<String> {
     }
 
     let url = "https://api.openai.com/v1/responses";
+    let mut content = vec![json!({
+        "type": "input_text",
+        "text": prompt
+    })];
+    for image in images {
+        content.push(json!({
+            "type": "input_image",
+            "image_url": format!("data:{};base64,{}", image.mime_type, image.data_base64)
+        }));
+    }
     let payload = json!({
         "model": model,
-        "input": prompt
+        "input": [{
+            "role": "user",
+            "content": content
+        }]
     });
 
     let client = reqwest::Client::builder()
@@ -74,4 +89,51 @@ pub async fn query(prompt: &str, config: &Config) -> Result<String> {
         .ok_or_else(|| anyhow!("Unexpected ChatGPT API response structure"))?;
 
     Ok(content.to_string())
+}
+
+pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result<String> {
+    let api_key = if let Some(ref c) = config.chatgpt {
+        c.api_key.clone()
+    } else {
+        return Err(anyhow!(
+            "⚠️ ChatGPT config section not found in config.yaml."
+        ));
+    };
+
+    if api_key.is_empty() || api_key == "YOUR_OPENAI_API_KEY" {
+        return Err(anyhow!(
+            "⚠️ OpenAI API key not configured. Configure it to use voice dictation."
+        ));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()?;
+
+    let part = multipart::Part::bytes(wav_bytes)
+        .file_name("dictation.wav")
+        .mime_str("audio/wav")?;
+    let form = multipart::Form::new()
+        .text("model", "whisper-1")
+        .text("response_format", "text")
+        .part("file", part);
+
+    let response = client
+        .post("https://api.openai.com/v1/audio/transcriptions")
+        .bearer_auth(api_key)
+        .multipart(form)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "OpenAI transcription error (HTTP {}): {}",
+            status,
+            text
+        ));
+    }
+
+    Ok(response.text().await?.trim().to_string())
 }

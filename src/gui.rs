@@ -1,12 +1,17 @@
+use base64::Engine as _;
 use eframe::egui;
 use egui::text::{CCursor, CCursorRange};
+use image::codecs::png::PngEncoder;
+use image::ImageEncoder;
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 use crate::backends;
 use crate::backends::PromptMode;
-use crate::backends::{HealthCheck, HealthLevel};
+use crate::backends::{HealthCheck, HealthLevel, ImageAttachment, QueryInput};
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
@@ -25,6 +30,11 @@ fn display_version() -> String {
     format!("{major}.{minor}.{patch:02}")
 }
 
+struct VoiceRecording {
+    child: Child,
+    path: PathBuf,
+}
+
 pub struct AiPopupApp {
     config: Config,
     theme: ResolvedTheme,
@@ -33,8 +43,13 @@ pub struct AiPopupApp {
     // UI State
     prompt: String,
     response: String,
+    attachments: Vec<ImageAttachment>,
+    attachment_notice: Option<String>,
+    attachment_error: Option<String>,
     selected_backend: String,
     is_loading: bool,
+    dictation_status: Option<String>,
+    voice_recording: Option<VoiceRecording>,
     prompt_focus_initialized: bool,
     generic_question_mode: bool,
     session_history_entries: Vec<HistoryEntry>,
@@ -55,6 +70,7 @@ pub struct AiPopupApp {
 
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
+    async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
 }
 
 impl AiPopupApp {
@@ -93,8 +109,13 @@ impl AiPopupApp {
             runtime,
             prompt: initial_prompt,
             response: String::new(),
+            attachments: Vec::new(),
+            attachment_notice: None,
+            attachment_error: None,
             selected_backend: default_backend,
             is_loading: false,
+            dictation_status: None,
+            voice_recording: None,
             prompt_focus_initialized: false,
             generic_question_mode: false,
             session_history_entries: Vec::new(),
@@ -113,6 +134,7 @@ impl AiPopupApp {
             available_locales: available_locales().unwrap_or_default(),
             i18n,
             async_response: Arc::new(Mutex::new(None)),
+            async_dictation: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -140,10 +162,33 @@ impl AiPopupApp {
                 }
             }
         }
+
+        let dictation = {
+            let mut dictation_lock = self.async_dictation.lock().unwrap();
+            dictation_lock.take()
+        };
+
+        if let Some(res) = dictation {
+            match res {
+                Ok(text) => {
+                    if !text.trim().is_empty() {
+                        if !self.prompt.trim().is_empty() && !self.prompt.ends_with('\n') {
+                            self.prompt.push('\n');
+                        }
+                        self.prompt.push_str(text.trim());
+                    }
+                    self.dictation_status = Some(self.tr("app.voice_ready"));
+                    self.attachment_error = None;
+                }
+                Err(error) => {
+                    self.dictation_status = Some(error);
+                }
+            }
+        }
     }
 
     fn submit_prompt(&mut self, ctx: &egui::Context) {
-        if self.prompt.trim().is_empty() || self.is_loading {
+        if (self.prompt.trim().is_empty() && self.attachments.is_empty()) || self.is_loading {
             return;
         }
 
@@ -151,6 +196,7 @@ impl AiPopupApp {
         self.response = format!("⏳ Querying {}…", self.selected_backend);
 
         let prompt = self.prompt.clone();
+        let images = self.attachments.clone();
         let backend = self.selected_backend.clone();
         let mode = if self.generic_question_mode {
             PromptMode::GenericQuestion
@@ -161,10 +207,13 @@ impl AiPopupApp {
         let async_response = self.async_response.clone();
         let ctx = ctx.clone();
         self.pending_submission = Some((backend.clone(), prompt.clone()));
+        self.attachment_notice = None;
+        self.attachment_error = None;
 
         // Spawn async task
         self.runtime.spawn(async move {
-            let res = backends::query(&backend, &prompt, &config, mode).await;
+            let res =
+                backends::query(&backend, &QueryInput { prompt, images }, &config, mode).await;
 
             // Store result
             *async_response.lock().unwrap() = Some(Ok(res));
@@ -370,6 +419,109 @@ impl AiPopupApp {
             }
         }
     }
+
+    fn attach_image_from_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif"])
+            .pick_file()
+        {
+            match load_image_attachment_from_path(&path) {
+                Ok(image) => {
+                    self.attachments.push(image);
+                    self.attachment_notice = Some(self.tr_with(
+                        "app.images_attached",
+                        &[("count", self.attachments.len().to_string())],
+                    ));
+                    self.attachment_error = None;
+                }
+                Err(err) => {
+                    self.attachment_error = Some(err);
+                }
+            }
+        }
+    }
+
+    fn attach_image_from_clipboard(&mut self) {
+        match load_image_attachment_from_clipboard() {
+            Ok(image) => {
+                self.attachments.push(image);
+                self.attachment_notice = Some(self.tr_with(
+                    "app.images_attached",
+                    &[("count", self.attachments.len().to_string())],
+                ));
+                self.attachment_error = None;
+            }
+            Err(err) => {
+                self.attachment_error = Some(err);
+            }
+        }
+    }
+
+    fn clear_attachments(&mut self) {
+        self.attachments.clear();
+        self.attachment_notice = None;
+        self.attachment_error = None;
+    }
+
+    fn toggle_dictation(&mut self, ctx: &egui::Context) {
+        if self.voice_recording.is_some() {
+            self.stop_dictation(ctx);
+        } else {
+            self.start_dictation();
+        }
+    }
+
+    fn start_dictation(&mut self) {
+        match begin_voice_recording() {
+            Ok(recording) => {
+                self.voice_recording = Some(recording);
+                self.dictation_status = Some(self.tr("app.voice_recording"));
+            }
+            Err(err) => {
+                self.dictation_status = Some(err);
+            }
+        }
+    }
+
+    fn stop_dictation(&mut self, ctx: &egui::Context) {
+        let Some(recording) = self.voice_recording.take() else {
+            return;
+        };
+
+        let wav_bytes = match finish_voice_recording(recording) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.dictation_status = Some(if err.is_empty() {
+                    self.tr("app.voice_error_capture")
+                } else {
+                    err
+                });
+                return;
+            }
+        };
+
+        self.dictation_status = Some(self.tr("app.voice_transcribing"));
+        let async_dictation = self.async_dictation.clone();
+        let config = self.config.clone();
+        let ctx = ctx.clone();
+        self.runtime.spawn(async move {
+            let result = backends::transcribe_wav_audio(wav_bytes, &config).await;
+            *async_dictation.lock().unwrap() = Some(result);
+            ctx.request_repaint();
+        });
+    }
+
+    fn copy_response_and_close(&mut self, ctx: &egui::Context) {
+        if self.response.trim().is_empty() {
+            return;
+        }
+
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            let _ = clipboard.set_text(self.response.clone());
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
 }
 
 impl eframe::App for AiPopupApp {
@@ -502,6 +654,100 @@ impl eframe::App for AiPopupApp {
                             })
                         {
                             self.submit_prompt(ctx);
+                        }
+
+                        if ctx.input(|i| {
+                            i.key_pressed(egui::Key::Enter)
+                                && (i.modifiers.ctrl || i.modifiers.command)
+                                && !i.modifiers.shift
+                                && !i.modifiers.alt
+                        }) {
+                            self.copy_response_and_close(ctx);
+                        }
+
+                        ui.add_space(8.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add(secondary_action_button(
+                                    &self.tr("app.attach_image"),
+                                    self.theme.panel_fill_soft,
+                                ))
+                                .clicked()
+                            {
+                                self.attach_image_from_file();
+                            }
+
+                            if ui
+                                .add(secondary_action_button(
+                                    &self.tr("app.paste_image"),
+                                    self.theme.panel_fill_soft,
+                                ))
+                                .clicked()
+                            {
+                                self.attach_image_from_clipboard();
+                            }
+
+                            let voice_label = if self.voice_recording.is_some() {
+                                self.tr("app.voice_stop")
+                            } else {
+                                self.tr("app.voice_start")
+                            };
+                            if ui
+                                .add(secondary_action_button(
+                                    &voice_label,
+                                    self.theme.panel_fill_soft,
+                                ))
+                                .clicked()
+                            {
+                                self.toggle_dictation(ctx);
+                            }
+
+                            if !self.attachments.is_empty()
+                                && ui
+                                    .add(secondary_action_button(
+                                        &self.tr("app.clear_images"),
+                                        self.theme.panel_fill,
+                                    ))
+                                    .clicked()
+                            {
+                                self.clear_attachments();
+                            }
+                        });
+
+                        if !self.attachments.is_empty() {
+                            ui.add_space(6.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(
+                                    egui::RichText::new(self.tr_with(
+                                        "app.images_attached",
+                                        &[("count", self.attachments.len().to_string())],
+                                    ))
+                                    .small()
+                                    .color(self.theme.weak_text_color),
+                                );
+                                for image in &self.attachments {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} ({})",
+                                            image.name,
+                                            format_size(image.size_bytes)
+                                        ))
+                                        .small()
+                                        .color(self.theme.text_color),
+                                    );
+                                }
+                            });
+                        }
+
+                        if let Some(status) = &self.dictation_status {
+                            ui.add_space(4.0);
+                            ui.label(muted_label(status, self.theme.weak_text_color));
+                        }
+                        if let Some(notice) = &self.attachment_notice {
+                            ui.label(muted_label(notice, self.theme.weak_text_color));
+                        }
+                        if let Some(error) = &self.attachment_error {
+                            ui.colored_label(self.theme.danger_color, error);
                         }
 
                         ui.add_space(8.0);
@@ -1263,6 +1509,152 @@ fn settings_text_field(
         edit = edit.password(true);
     }
     ui.add(edit).changed()
+}
+
+fn load_image_attachment_from_path(path: &Path) -> Result<ImageAttachment, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|err| format!("Could not read image file `{}`: {}", path.display(), err))?;
+    let mime_type = infer_image_mime(path)
+        .ok_or_else(|| "Unsupported image format. Use PNG, JPG, JPEG, WEBP, or GIF.".to_string())?;
+
+    Ok(ImageAttachment {
+        name: path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("image")
+            .to_string(),
+        mime_type: mime_type.to_string(),
+        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes.as_slice()),
+        size_bytes: bytes.len(),
+    })
+}
+
+fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|err| format!("Clipboard not available: {}", err))?;
+    let image = clipboard
+        .get_image()
+        .map_err(|_| "Clipboard does not currently contain an image.".to_string())?;
+
+    let mut png_bytes = Vec::new();
+    PngEncoder::new(&mut png_bytes)
+        .write_image(
+            image.bytes.as_ref(),
+            image.width as u32,
+            image.height as u32,
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|err| format!("Could not encode clipboard image: {}", err))?;
+
+    Ok(ImageAttachment {
+        name: "clipboard-screenshot.png".to_string(),
+        mime_type: "image/png".to_string(),
+        data_base64: base64::engine::general_purpose::STANDARD.encode(png_bytes.as_slice()),
+        size_bytes: png_bytes.len(),
+    })
+}
+
+fn infer_image_mime(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_lowercase())
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        _ => None,
+    }
+}
+
+fn format_size(bytes: usize) -> String {
+    const KB: f32 = 1024.0;
+    const MB: f32 = 1024.0 * 1024.0;
+    if bytes as f32 >= MB {
+        format!("{:.1} MB", bytes as f32 / MB)
+    } else if bytes as f32 >= KB {
+        format!("{:.0} KB", bytes as f32 / KB)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn begin_voice_recording() -> Result<VoiceRecording, String> {
+    let path = std::env::temp_dir().join(format!(
+        "armando-dictation-{}-{}.wav",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0)
+    ));
+
+    let mut command = if command_exists("ffmpeg") {
+        let mut command = Command::new("ffmpeg");
+        command.args([
+            "-y",
+            "-f",
+            "pulse",
+            "-i",
+            "default",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-acodec",
+            "pcm_s16le",
+        ]);
+        command.arg(&path);
+        command
+    } else if command_exists("arecord") {
+        let mut command = Command::new("arecord");
+        command.args(["-q", "-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "wav"]);
+        command.arg(&path);
+        command
+    } else {
+        return Err(
+            "Voice dictation requires `ffmpeg` or `arecord` to be installed on the system."
+                .to_string(),
+        );
+    };
+
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| format!("Could not start microphone recording: {}", err))?;
+
+    Ok(VoiceRecording { child, path })
+}
+
+fn finish_voice_recording(mut recording: VoiceRecording) -> Result<Vec<u8>, String> {
+    let pid = recording.child.id().to_string();
+    let _ = Command::new("kill")
+        .args(["-INT", &pid])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = recording.child.wait();
+
+    let bytes = std::fs::read(&recording.path)
+        .map_err(|err| format!("Could not read recorded dictation audio: {}", err))?;
+    let _ = std::fs::remove_file(&recording.path);
+    if bytes.is_empty() {
+        return Err(String::new());
+    }
+    Ok(bytes)
+}
+
+fn command_exists(name: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {} >/dev/null 2>&1", name))
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 fn history_entry_card(

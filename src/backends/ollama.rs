@@ -1,8 +1,9 @@
+use crate::backends::ImageAttachment;
 use crate::config::Config;
 use anyhow::{anyhow, Result};
 use serde_json::json;
 
-pub async fn query(prompt: &str, config: &Config) -> Result<String> {
+pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) -> Result<String> {
     let (base_url, model) = if let Some(ref o) = config.ollama {
         (
             o.base_url.trim_end_matches('/').to_string(),
@@ -16,6 +17,10 @@ pub async fn query(prompt: &str, config: &Config) -> Result<String> {
     let payload = json!({
         "model": model,
         "prompt": prompt,
+        "images": images
+            .iter()
+            .map(|image| image.data_base64.clone())
+            .collect::<Vec<_>>(),
         "stream": false
     });
 

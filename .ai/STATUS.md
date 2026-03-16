@@ -20,6 +20,10 @@
 - Project icon integrated both in the native viewport and in the local desktop installation assets
 - Prompt preparation optimized for cleanup, rewriting, translation, and text adaptation
 - UI toggle between text-assist mode and generic-question mode
+- Image attachments from file picker
+- Screenshot/image paste from clipboard
+- Voice dictation flow with microphone recording and OpenAI transcription
+- Multimodal request forwarding for ChatGPT, Claude, Gemini, and Ollama image-capable models
 - Regression-oriented unit tests for prompt preparation, tag parsing, history retention, config loading, and theme loading
 - Persistent local history with 7-day retention
 - History filters by backend and text
@@ -32,6 +36,9 @@
 
 - Theme and language are applied from config at startup and can be changed live
 - Backend dropdowns use plain backend names without extra per-provider symbols
+- The prompt area can now carry text plus zero or more attached images
+- Clipboard screenshots are converted to PNG and attached directly from the UI
+- Voice dictation records microphone audio through `ffmpeg` or `arecord` when available, then appends the transcription to the prompt
 - History reloads when the panel is opened and after every successful response
 - The history list uses its own scroll region, separate from the rest of the UI
 - Opening history expands the window downward through native viewport sizing so the panel remains visible
@@ -51,6 +58,8 @@
 - No automated UI tests for layout, scrolling, and popup interactions
 - No safe terminal or MCP tool integration yet
 - Window icon visibility may still vary by desktop environment even when the app id and desktop entry are aligned
+- Voice dictation currently depends on system audio capture tools and an OpenAI API key for transcription
+- Image support depends on the selected backend model actually being vision-capable
 
 ## Immediate Priorities
 

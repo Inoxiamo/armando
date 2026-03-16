@@ -8,6 +8,7 @@
 - HTTP client: `reqwest`
 - Configuration: `serde_yaml`
 - Clipboard: `arboard`
+- File picker: `rfd`
 
 ## Main Components
 
@@ -15,7 +16,7 @@
   Application entry point. Loads config and theme, configures the native viewport, and opens the popup UI directly.
 
 - `src/gui.rs`
-  Owns the main interaction flow: prompt entry, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
+  Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
 
 - `src/config.rs`
   Defines the YAML configuration schema, persistence behavior, and config path resolution.
@@ -33,7 +34,7 @@
   Centralizes application paths for config, themes, locales, and history.
 
 - `src/backends/*`
-  Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude.
+  Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude, including multimodal image payload mapping.
 
 - `scripts/install-local.sh`
   Builds the release binary and installs the user-local binary, config, themes, locales, icon, and desktop entry.
@@ -51,17 +52,19 @@
 3. The selected UI locale is loaded
 4. The desktop popup UI opens directly
 5. The UI may preload selected text from the OS
-6. The user submits a prompt
-7. An async task queries the selected backend
-8. Successful responses are appended to local history
-9. The response is rendered in the popup
-10. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
-11. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+6. The user can enrich the prompt with attached images, clipboard screenshots, or voice dictation
+7. Voice dictation records to a temporary audio file and sends it to OpenAI transcription before appending text to the prompt
+8. The user submits a prompt
+9. An async task queries the selected backend
+10. Successful responses are appended to local history
+11. The response is rendered in the popup
+12. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
+13. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
 
 ## UI Structure
 
 - Main popup area:
-  backend selector, settings access, generic mode toggle, prompt editor, primary actions, and response area
+  backend selector, settings access, generic mode toggle, prompt editor, multimodal input actions, primary actions, and response area
 - Settings side panel:
   language/theme/backend selectors, model and key sections, and persistence feedback
 - History panel:
@@ -108,3 +111,4 @@ When history is opened, the window updates `MinInnerSize` and `InnerSize` throug
 - Local history is stored in the user data directory, not in the repository
 - Themes and locales are resolved both from the repository and from central user directories
 - On Linux/Wayland, the viewport `app_id` should match the installed `.desktop` entry so launchers and taskbars can resolve the correct application identity and icon
+- Voice dictation relies on `ffmpeg` or `arecord` being available on the system path
