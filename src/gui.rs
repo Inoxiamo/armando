@@ -3,7 +3,7 @@ use eframe::egui;
 use egui::text::{CCursor, CCursorRange};
 use image::codecs::png::PngEncoder;
 use image::ImageEncoder;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -45,6 +45,13 @@ struct RequestFingerprint {
     conversation: Vec<ConversationTurn>,
 }
 
+#[derive(Default)]
+struct ProviderModelState {
+    models: Vec<String>,
+    is_loading: bool,
+    last_error: Option<String>,
+}
+
 pub struct AiPopupApp {
     config: Config,
     theme: ResolvedTheme,
@@ -80,10 +87,12 @@ pub struct AiPopupApp {
     available_themes: Vec<String>,
     available_locales: Vec<LocaleDefinition>,
     i18n: I18n,
+    provider_model_states: HashMap<String, ProviderModelState>,
 
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
+    async_available_models: Arc<Mutex<Vec<(String, Result<Vec<String>, String>)>>>,
     last_completed_request: Option<RequestFingerprint>,
 }
 
@@ -154,8 +163,10 @@ impl AiPopupApp {
             available_themes: available_theme_names().unwrap_or_else(|_| vec![fallback_theme_name]),
             available_locales: available_locales().unwrap_or_default(),
             i18n,
+            provider_model_states: HashMap::new(),
             async_response: Arc::new(Mutex::new(None)),
             async_dictation: Arc::new(Mutex::new(None)),
+            async_available_models: Arc::new(Mutex::new(Vec::new())),
             last_completed_request: None,
         }
     }
@@ -219,6 +230,25 @@ impl AiPopupApp {
                 }
                 Err(error) => {
                     self.dictation_status = Some(error);
+                }
+            }
+        }
+
+        let available_models = {
+            let mut models_lock = self.async_available_models.lock().unwrap();
+            std::mem::take(&mut *models_lock)
+        };
+
+        for (provider, result) in available_models {
+            let state = self.provider_model_states.entry(provider).or_default();
+            state.is_loading = false;
+            match result {
+                Ok(models) => {
+                    state.models = models;
+                    state.last_error = None;
+                }
+                Err(error) => {
+                    state.last_error = Some(error);
                 }
             }
         }
@@ -625,6 +655,40 @@ impl AiPopupApp {
             } else {
                 Vec::new()
             },
+        }
+    }
+
+    fn request_provider_models(&mut self, ctx: &egui::Context, provider: &str) {
+        let state = self
+            .provider_model_states
+            .entry(provider.to_string())
+            .or_default();
+        if state.is_loading {
+            return;
+        }
+        state.is_loading = true;
+        state.last_error = None;
+
+        let config = self.config.clone();
+        let provider_name = provider.to_string();
+        let async_available_models = self.async_available_models.clone();
+        let ctx = ctx.clone();
+
+        self.runtime.spawn(async move {
+            let result = backends::fetch_available_models(&provider_name, &config).await;
+            async_available_models
+                .lock()
+                .unwrap()
+                .push((provider_name, result));
+            ctx.request_repaint();
+        });
+    }
+
+    fn invalidate_provider_models(&mut self, provider: &str) {
+        if let Some(state) = self.provider_model_states.get_mut(provider) {
+            state.models.clear();
+            state.is_loading = false;
+            state.last_error = None;
         }
     }
 }
@@ -1526,72 +1590,108 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
 
                 let gemini_key_label = app.tr("settings.gemini_key");
                 let gemini_model_label = app.tr("settings.gemini_model");
-                if let Some(gemini) = app.config.gemini.as_mut() {
+                let settings_theme = app.theme.clone();
+                if let Some(gemini) = app.config.gemini.clone() {
+                    let mut gemini_key = gemini.api_key;
+                    let mut gemini_model = gemini.model;
                     if provider_settings_section(
+                        app,
+                        ctx,
                         ui,
-                        &app.theme,
+                        &settings_theme,
                         "settings_provider_gemini",
                         "gemini",
                         &find_health("gemini"),
                         &gemini_key_label,
                         &gemini_model_label,
-                        &mut gemini.api_key,
-                        &mut gemini.model,
+                        &mut gemini_key,
+                        &mut gemini_model,
                     ) {
+                        if let Some(gemini) = app.config.gemini.as_mut() {
+                            gemini.api_key = gemini_key;
+                            gemini.model = gemini_model;
+                        }
                         app.persist_settings();
                     }
                 }
 
                 let chatgpt_key_label = app.tr("settings.chatgpt_key");
                 let chatgpt_model_label = app.tr("settings.chatgpt_model");
-                if let Some(chatgpt) = app.config.chatgpt.as_mut() {
+                let settings_theme = app.theme.clone();
+                if let Some(chatgpt) = app.config.chatgpt.clone() {
+                    let mut chatgpt_key = chatgpt.api_key;
+                    let mut chatgpt_model = chatgpt.model;
                     if provider_settings_section(
+                        app,
+                        ctx,
                         ui,
-                        &app.theme,
+                        &settings_theme,
                         "settings_provider_chatgpt",
                         "chatgpt",
                         &find_health("chatgpt"),
                         &chatgpt_key_label,
                         &chatgpt_model_label,
-                        &mut chatgpt.api_key,
-                        &mut chatgpt.model,
+                        &mut chatgpt_key,
+                        &mut chatgpt_model,
                     ) {
+                        if let Some(chatgpt) = app.config.chatgpt.as_mut() {
+                            chatgpt.api_key = chatgpt_key;
+                            chatgpt.model = chatgpt_model;
+                        }
                         app.persist_settings();
                     }
                 }
 
                 let claude_key_label = app.tr("settings.claude_key");
                 let claude_model_label = app.tr("settings.claude_model");
-                if let Some(claude) = app.config.claude.as_mut() {
+                let settings_theme = app.theme.clone();
+                if let Some(claude) = app.config.claude.clone() {
+                    let mut claude_key = claude.api_key;
+                    let mut claude_model = claude.model;
                     if provider_settings_section(
+                        app,
+                        ctx,
                         ui,
-                        &app.theme,
+                        &settings_theme,
                         "settings_provider_claude",
                         "claude",
                         &find_health("claude"),
                         &claude_key_label,
                         &claude_model_label,
-                        &mut claude.api_key,
-                        &mut claude.model,
+                        &mut claude_key,
+                        &mut claude_model,
                     ) {
+                        if let Some(claude) = app.config.claude.as_mut() {
+                            claude.api_key = claude_key;
+                            claude.model = claude_model;
+                        }
                         app.persist_settings();
                     }
                 }
 
                 let ollama_url_label = app.tr("settings.ollama_url");
                 let ollama_model_label = app.tr("settings.ollama_model");
-                if let Some(ollama) = app.config.ollama.as_mut() {
+                let settings_theme = app.theme.clone();
+                if let Some(ollama) = app.config.ollama.clone() {
+                    let mut ollama_url = ollama.base_url;
+                    let mut ollama_model = ollama.model;
                     if provider_settings_section(
+                        app,
+                        ctx,
                         ui,
-                        &app.theme,
+                        &settings_theme,
                         "settings_provider_ollama",
                         "ollama",
                         &find_health("ollama"),
                         &ollama_url_label,
                         &ollama_model_label,
-                        &mut ollama.base_url,
-                        &mut ollama.model,
+                        &mut ollama_url,
+                        &mut ollama_model,
                     ) {
+                        if let Some(ollama) = app.config.ollama.as_mut() {
+                            ollama.base_url = ollama_url;
+                            ollama.model = ollama_model;
+                        }
                         app.persist_settings();
                     }
                 }
@@ -1606,6 +1706,8 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
 }
 
 fn provider_settings_section(
+    app: &mut AiPopupApp,
+    ctx: &egui::Context,
     ui: &mut egui::Ui,
     theme: &ResolvedTheme,
     id: &str,
@@ -1617,6 +1719,12 @@ fn provider_settings_section(
     secondary_value: &mut String,
 ) -> bool {
     let mut changed = false;
+    let mut should_fetch_models = false;
+    let available_models_label = app.tr("settings.available_models");
+    let refresh_models_label = app.tr("settings.refresh_models");
+    let loading_models_label = app.tr("settings.loading_models");
+    let select_model_label = app.tr("settings.select_model");
+    let models_hint_label = app.tr("settings.models_hint");
     let color = match health_check.level {
         HealthLevel::Ok => theme.accent_color,
         HealthLevel::Warning => egui::Color32::from_rgb(227, 177, 76),
@@ -1638,9 +1746,51 @@ fn provider_settings_section(
                     .small()
                     .color(theme.weak_text_color),
             );
-            changed |= settings_text_field(ui, theme, primary_label, primary_value, true);
-            changed |= settings_text_field(ui, theme, secondary_label, secondary_value, false);
+            ui.add_space(8.0);
+            ui.label(muted_label(
+                &app.tr("settings.model_credits"),
+                theme.weak_text_color,
+            ));
+            ui.label(
+                egui::RichText::new(provider_credit_label(app, provider))
+                    .color(color)
+                    .strong(),
+            );
+            ui.label(muted_label(
+                &provider_credit_note(app, provider),
+                theme.weak_text_color,
+            ));
+
+            let primary_changed =
+                settings_text_field(ui, theme, primary_label, primary_value, true);
+            if primary_changed {
+                app.invalidate_provider_models(provider);
+            }
+            changed |= primary_changed;
+
+            let model_state = app
+                .provider_model_states
+                .entry(provider.to_string())
+                .or_default();
+            let (model_changed, model_interacted) = settings_model_field(
+                ui,
+                theme,
+                provider,
+                secondary_label,
+                secondary_value,
+                model_state,
+                &available_models_label,
+                &refresh_models_label,
+                &loading_models_label,
+                &select_model_label,
+                &models_hint_label,
+            );
+            changed |= model_changed;
+            should_fetch_models = model_interacted && model_state.models.is_empty();
         });
+    if should_fetch_models {
+        app.request_provider_models(ctx, provider);
+    }
     changed
 }
 
@@ -1658,6 +1808,93 @@ fn settings_text_field(
         edit = edit.password(true);
     }
     ui.add(edit).changed()
+}
+
+fn settings_model_field(
+    ui: &mut egui::Ui,
+    theme: &ResolvedTheme,
+    provider: &str,
+    label: &str,
+    value: &mut String,
+    state: &mut ProviderModelState,
+    available_models_label: &str,
+    refresh_label: &str,
+    loading_label: &str,
+    select_model_label: &str,
+    models_hint_label: &str,
+) -> (bool, bool) {
+    let mut changed = false;
+    let mut should_fetch = false;
+
+    ui.add_space(8.0);
+    ui.label(muted_label(label, theme.weak_text_color));
+    let response = ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+    changed |= response.changed();
+    should_fetch |= response.clicked() || response.gained_focus() || response.has_focus();
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(muted_label(available_models_label, theme.weak_text_color));
+        let button_label = if state.is_loading {
+            loading_label
+        } else {
+            refresh_label
+        };
+        if ui
+            .add_enabled(
+                !state.is_loading,
+                secondary_action_button(button_label, theme.panel_fill_soft),
+            )
+            .clicked()
+        {
+            state.models.clear();
+            state.last_error = None;
+            should_fetch = true;
+        }
+    });
+
+    if state.is_loading {
+        ui.label(muted_label(loading_label, theme.weak_text_color));
+    } else if !state.models.is_empty() {
+        let selected_text = if value.trim().is_empty() {
+            select_model_label.to_string()
+        } else {
+            value.clone()
+        };
+        egui::ComboBox::from_id_source(format!("{provider}_available_models"))
+            .selected_text(dropdown_button_text(&selected_text, theme))
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                apply_dropdown_menu_style(ui, theme);
+                for model in &state.models {
+                    if ui.selectable_value(value, model.clone(), model).changed() {
+                        changed = true;
+                    }
+                }
+            });
+    } else {
+        ui.label(muted_label(models_hint_label, theme.weak_text_color));
+    }
+
+    if let Some(error) = &state.last_error {
+        ui.label(egui::RichText::new(error).small().color(theme.danger_color));
+    }
+
+    (changed, should_fetch)
+}
+
+fn provider_credit_label(app: &AiPopupApp, provider: &str) -> String {
+    match provider {
+        "ollama" => app.tr("settings.credits_infinite"),
+        _ => app.tr("settings.credits_unknown"),
+    }
+}
+
+fn provider_credit_note(app: &AiPopupApp, provider: &str) -> String {
+    match provider {
+        "ollama" => app.tr("settings.model_credits_local"),
+        _ => app.tr("settings.model_credits_unavailable"),
+    }
 }
 
 fn load_image_attachment_from_path(path: &Path) -> Result<ImageAttachment, String> {

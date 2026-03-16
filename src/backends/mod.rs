@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::history;
 use crate::logging;
 use std::collections::HashMap;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageAttachment {
@@ -98,6 +99,16 @@ pub fn health_checks(config: &Config) -> Vec<HealthCheck> {
         health_check_gemini(config),
         health_check_ollama(config),
     ]
+}
+
+pub async fn fetch_available_models(backend: &str, config: &Config) -> Result<Vec<String>, String> {
+    match backend {
+        "chatgpt" => fetch_openai_models(config).await,
+        "claude" => fetch_claude_models(config).await,
+        "gemini" => fetch_gemini_models(config).await,
+        "ollama" => fetch_ollama_models(config).await,
+        _ => Err(format!("Unsupported backend `{backend}`.")),
+    }
 }
 
 fn health_check_openai(config: &Config) -> HealthCheck {
@@ -226,6 +237,191 @@ fn health_check_ollama(config: &Config) -> HealthCheck {
             "No `ollama` section found in config.",
         ),
     }
+}
+
+async fn fetch_openai_models(config: &Config) -> Result<Vec<String>, String> {
+    let chatgpt = config
+        .chatgpt
+        .as_ref()
+        .ok_or_else(|| "OpenAI is not configured.".to_string())?;
+
+    if chatgpt.api_key.trim().is_empty() || chatgpt.api_key == "YOUR_OPENAI_API_KEY" {
+        return Err("Set an OpenAI API key before loading available models.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
+    let response = client
+        .get("https://api.openai.com/v1/models")
+        .bearer_auth(&chatgpt.api_key)
+        .send()
+        .await
+        .map_err(|err| format!("OpenAI model lookup failed: {err}"))?;
+
+    collect_model_ids(response, |id| {
+        id.starts_with("gpt-") || id.starts_with("o") || id.contains("omni")
+    })
+    .await
+}
+
+async fn fetch_claude_models(config: &Config) -> Result<Vec<String>, String> {
+    let claude = config
+        .claude
+        .as_ref()
+        .ok_or_else(|| "Anthropic is not configured.".to_string())?;
+
+    if claude.api_key.trim().is_empty() || claude.api_key == "YOUR_ANTHROPIC_API_KEY" {
+        return Err("Set an Anthropic API key before loading available models.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
+    let response = client
+        .get("https://api.anthropic.com/v1/models")
+        .header("x-api-key", &claude.api_key)
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await
+        .map_err(|err| format!("Anthropic model lookup failed: {err}"))?;
+
+    collect_model_ids(response, |id| id.starts_with("claude-")).await
+}
+
+async fn fetch_gemini_models(config: &Config) -> Result<Vec<String>, String> {
+    let gemini = config
+        .gemini
+        .as_ref()
+        .ok_or_else(|| "Gemini is not configured.".to_string())?;
+
+    if gemini.api_key.trim().is_empty() || gemini.api_key == "YOUR_GEMINI_API_KEY" {
+        return Err("Set a Gemini API key before loading available models.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
+    let response = client
+        .get("https://generativelanguage.googleapis.com/v1beta/models")
+        .query(&[("key", gemini.api_key.as_str())])
+        .send()
+        .await
+        .map_err(|err| format!("Gemini model lookup failed: {err}"))?;
+
+    let value = parse_response_json(response).await?;
+    let mut models = value
+        .get("models")
+        .and_then(|items| items.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|model| {
+            model
+                .get("supportedGenerationMethods")
+                .and_then(|methods| methods.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|method| method.as_str())
+                .any(|method| method == "generateContent")
+        })
+        .filter_map(|model| model.get("name").and_then(|name| name.as_str()))
+        .map(|name| name.trim_start_matches("models/").to_string())
+        .collect::<Vec<_>>();
+
+    normalize_models(&mut models);
+    if models.is_empty() {
+        return Err("No Gemini text-generation models were returned.".to_string());
+    }
+    Ok(models)
+}
+
+async fn fetch_ollama_models(config: &Config) -> Result<Vec<String>, String> {
+    let ollama = config
+        .ollama
+        .as_ref()
+        .ok_or_else(|| "Ollama is not configured.".to_string())?;
+
+    if ollama.base_url.trim().is_empty() {
+        return Err("Set an Ollama base URL before loading available models.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
+    let response = client
+        .get(format!(
+            "{}/api/tags",
+            ollama.base_url.trim_end_matches('/')
+        ))
+        .send()
+        .await
+        .map_err(|err| format!("Ollama model lookup failed: {err}"))?;
+    let value = parse_response_json(response).await?;
+    let mut models = value
+        .get("models")
+        .and_then(|items| items.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|model| model.get("name").and_then(|name| name.as_str()))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    normalize_models(&mut models);
+    if models.is_empty() {
+        return Err("No Ollama models were returned by the local server.".to_string());
+    }
+    Ok(models)
+}
+
+async fn collect_model_ids(
+    response: reqwest::Response,
+    keep: impl Fn(&str) -> bool,
+) -> Result<Vec<String>, String> {
+    let value = parse_response_json(response).await?;
+    let mut models = value
+        .get("data")
+        .and_then(|items| items.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("id").and_then(|id| id.as_str()))
+        .filter(|id| keep(id))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    normalize_models(&mut models);
+    if models.is_empty() {
+        return Err("No compatible models were returned by the provider.".to_string());
+    }
+    Ok(models)
+}
+
+async fn parse_response_json(response: reqwest::Response) -> Result<serde_json::Value, String> {
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("Could not read provider response: {err}"))?;
+
+    if !status.is_success() {
+        let detail = body.trim();
+        return Err(if detail.is_empty() {
+            format!("Provider request failed with status {status}.")
+        } else {
+            format!("Provider request failed with status {status}: {detail}")
+        });
+    }
+
+    serde_json::from_str(&body).map_err(|err| format!("Could not parse provider response: {err}"))
+}
+
+fn normalize_models(models: &mut Vec<String>) {
+    models.retain(|model| !model.trim().is_empty());
+    models.sort();
+    models.dedup();
 }
 
 fn ok(backend: &str, summary: &str, detail: String) -> HealthCheck {

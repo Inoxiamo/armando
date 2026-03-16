@@ -23,6 +23,8 @@
 - Optional checkbox to keep an in-memory chat session inside the current popup run
 - Optional local history, disabled by default and enabled only on user request
 - Optional debug logging for requests and errors, disabled by default and intended only for diagnostics
+- Provider settings can load the currently available models from the backend API or local Ollama server and let the user pick them from a dropdown
+- Provider settings show a residual-credit indicator, with `∞` for Ollama and `n/d` for cloud providers that do not expose reliable balance data here
 - Image attachments from file picker
 - Screenshot/image paste from clipboard
 - Voice dictation flow with microphone recording and OpenAI transcription
@@ -45,6 +47,8 @@
 - When chat session mode is enabled, previous popup turns are reused as conversational context for the next request
 - Local history can be enabled from config or UI and stays off by default to avoid storing prompts and responses unless requested
 - Debug logging can be enabled from config or UI and writes local request/error events only when explicitly turned on
+- Each provider model field remains editable by hand, but clicking it can also load a provider-specific list of available models and expose it as a dropdown picker
+- Ollama shows infinite local availability, while cloud backends currently surface `n/d` because this app cannot read a dependable remaining-credit balance from those providers
 - History reloads when enabled, when the panel is opened, and after every successful response
 - The history list uses its own scroll region, separate from the rest of the UI
 - Opening history expands the window downward through native viewport sizing so the panel remains visible
@@ -69,6 +73,7 @@
 - Image support depends on the selected backend model actually being vision-capable
 - Debug logging may capture sensitive request content and should stay disabled unless actively troubleshooting
 - Local history stores prompts and responses on disk and should stay disabled unless the user explicitly wants that archive
+- Remaining cloud credits are shown as unavailable metadata rather than a real numeric balance because the current provider integrations do not expose a stable shared balance endpoint here
 
 ## Immediate Priorities
 

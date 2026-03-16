@@ -16,7 +16,7 @@
   Application entry point. Loads config and theme, configures the native viewport, and opens the popup UI directly.
 
 - `src/gui.rs`
-  Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, optional in-memory chat session state, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
+  Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, optional in-memory chat session state, backend selection, response rendering, settings, provider model discovery/picking, history, localization, and theme-aware widget styling.
 
 - `src/config.rs`
   Defines the YAML configuration schema, persistence behavior, and config path resolution, including opt-in local history and debug logging.
@@ -34,7 +34,7 @@
   Centralizes application paths for config, themes, locales, and history.
 
 - `src/backends/*`
-  Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude, including multimodal image payload mapping.
+  Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude, including multimodal image payload mapping and provider-specific available-model discovery.
 
 - `src/logging.rs`
   Handles opt-in local debug logging for request, success, and error events.
@@ -64,14 +64,16 @@
 12. If local history is enabled, successful responses are appended to local history
 13. The response is rendered in the popup
 14. The user can change theme, language, backend, models, credentials, history, and debug settings from the settings panel with immediate persistence
-15. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+15. Provider sections can asynchronously load model lists from the configured backend and expose them in a dropdown under the editable model field
+16. The settings panel also surfaces a lightweight credit-availability indicator: `∞` for local Ollama usage and `n/d` for cloud providers whose remaining balance is not exposed through this integration
+17. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
 
 ## UI Structure
 
 - Main popup area:
   backend selector, settings access, generic mode toggle, prompt editor, multimodal input actions, primary actions, and response area
 - Settings side panel:
-  language/theme/backend selectors, model and key sections, and persistence feedback
+  language/theme/backend selectors, history/debug toggles, model/key sections, provider model dropdowns, credit indicators, and persistence feedback
 - History panel:
   backend filter, text filter, batch actions, and reusable history cards
 
