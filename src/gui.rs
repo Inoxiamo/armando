@@ -1052,7 +1052,10 @@ impl eframe::App for AiPopupApp {
                             ctx.request_repaint();
                         }
 
-                        if input_resp.has_focus()
+                        let prompt_has_focus =
+                            input_resp.has_focus() || ctx.memory(|mem| mem.has_focus(prompt_id));
+
+                        if prompt_has_focus
                             && ctx.input(|i| {
                                 i.key_pressed(egui::Key::Enter)
                                     && !i.modifiers.shift
@@ -1074,7 +1077,7 @@ impl eframe::App for AiPopupApp {
                             self.submit_prompt(ctx);
                         }
 
-                        if input_resp.has_focus()
+                        if prompt_has_focus
                             && ctx.input(|i| {
                                 (i.key_pressed(egui::Key::V)
                                     && (i.modifiers.ctrl || i.modifiers.command)
@@ -2403,16 +2406,14 @@ fn load_image_attachment_from_path(path: &Path) -> Result<ImageAttachment, Strin
     let mime_type = infer_image_mime(path)
         .ok_or_else(|| "Unsupported image format. Use PNG, JPG, JPEG, WEBP, or GIF.".to_string())?;
 
-    Ok(ImageAttachment {
-        name: path
-            .file_name()
+    Ok(image_attachment_from_bytes(
+        path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("image")
             .to_string(),
-        mime_type: mime_type.to_string(),
-        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes.as_slice()),
-        size_bytes: bytes.len(),
-    })
+        mime_type.to_string(),
+        bytes,
+    ))
 }
 
 fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
@@ -2429,12 +2430,11 @@ fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
             )
             .map_err(|err| format!("Could not encode clipboard image: {}", err))?;
 
-        return Ok(ImageAttachment {
-            name: "clipboard-screenshot.png".to_string(),
-            mime_type: "image/png".to_string(),
-            data_base64: base64::engine::general_purpose::STANDARD.encode(png_bytes.as_slice()),
-            size_bytes: png_bytes.len(),
-        });
+        return Ok(image_attachment_from_bytes(
+            "clipboard-screenshot.png".to_string(),
+            "image/png".to_string(),
+            png_bytes,
+        ));
     }
 
     if let Ok(text) = clipboard.get_text() {
@@ -2443,7 +2443,20 @@ fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
         }
     }
 
+    if let Some(attachment) = load_image_attachment_from_system_clipboard_commands() {
+        return Ok(attachment);
+    }
+
     Err("Clipboard does not currently contain an image.".to_string())
+}
+
+fn image_attachment_from_bytes(name: String, mime_type: String, bytes: Vec<u8>) -> ImageAttachment {
+    ImageAttachment {
+        name,
+        mime_type,
+        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes.as_slice()),
+        size_bytes: bytes.len(),
+    }
 }
 
 fn extract_image_path_from_clipboard_text(text: &str) -> Option<PathBuf> {
@@ -2463,6 +2476,54 @@ fn extract_image_path_from_clipboard_text(text: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn load_image_attachment_from_system_clipboard_commands() -> Option<ImageAttachment> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for (mime, extension) in [
+            ("image/png", "png"),
+            ("image/jpeg", "jpg"),
+            ("image/webp", "webp"),
+            ("image/gif", "gif"),
+        ] {
+            if let Some(bytes) = try_read_wayland_clipboard_image(mime)
+                .or_else(|| try_read_x11_clipboard_image(mime))
+            {
+                return Some(image_attachment_from_bytes(
+                    format!("clipboard-image.{extension}"),
+                    mime.to_string(),
+                    bytes,
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn try_read_wayland_clipboard_image(mime_type: &str) -> Option<Vec<u8>> {
+    let output = Command::new("wl-paste")
+        .args(["--no-newline", "--type", mime_type])
+        .output()
+        .ok()?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return None;
+    }
+    Some(output.stdout)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn try_read_x11_clipboard_image(mime_type: &str) -> Option<Vec<u8>> {
+    let output = Command::new("xclip")
+        .args(["-selection", "clipboard", "-t", mime_type, "-o"])
+        .output()
+        .ok()?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return None;
+    }
+    Some(output.stdout)
 }
 
 fn infer_image_mime(path: &Path) -> Option<&'static str> {
