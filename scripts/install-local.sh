@@ -5,6 +5,7 @@ APP_NAME="armando"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="${HOME}/.local/bin"
 PLATFORM="${ARMANDO_INSTALL_OS:-$(uname -s)}"
+TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT_DIR}/target}"
 
 case "${PLATFORM}" in
   Linux)
@@ -25,7 +26,7 @@ CONFIG_DIR="${CONFIG_ROOT}/configs"
 THEMES_DIR="${CONFIG_ROOT}/themes"
 LOCALES_DIR="${CONFIG_ROOT}/locales"
 ASSETS_DIR="${DATA_ROOT}/assets"
-RELEASE_BIN="${ROOT_DIR}/target/release/${APP_NAME}"
+RELEASE_BIN="${TARGET_DIR}/release/${APP_NAME}"
 CONFIG_SOURCE="${ROOT_DIR}/configs/default.yaml"
 ICON_SOURCE="${ROOT_DIR}/assets/${APP_NAME}.svg"
 DESKTOP_SOURCE="${ROOT_DIR}/assets/${APP_NAME}.desktop"

@@ -1,7 +1,7 @@
 # armando
 
 `armando` is a lightweight cross-platform desktop AI popup built in Rust with `egui`.
-It opens a minimal assistant window on top of your workflow so you can ask questions, rewrite text, attach images, and send prompts to Gemini, ChatGPT, Claude, or a local Ollama model.
+It stays close to your workflow so you can ask questions, rewrite text, attach images, and send prompts to Gemini, ChatGPT, Claude, or a local Ollama model.
 
 ## Highlights
 
@@ -10,77 +10,20 @@ It opens a minimal assistant window on top of your workflow so you can ask quest
 - Text-assist mode and generic-question mode
 - External YAML configuration, themes, and locales
 - Optional local history and optional debug logging
-- Image attachments and clipboard image paste
-- Voice dictation flow with OpenAI transcription
+- Image attachments, clipboard image paste, and voice dictation
 - Release bundles for Linux, macOS, and Windows
 
-## Quick Start
+## Get armando
 
-Build the project:
+- Latest release: <https://github.com/Inoxiamo/armando/releases/latest>
+- All releases: <https://github.com/Inoxiamo/armando/releases>
 
-```bash
-cargo build --release
-```
+Start with [`INSTALL.md`](INSTALL.md) for the release download, OS-specific install steps, config paths, and first-run setup.
 
-Run it locally:
-
-```bash
-./target/release/armando
-```
-
-Install the local build plus bundled config, themes, locales, and assets:
-
-```bash
-./scripts/install-local.sh
-```
-
-## Releases And Installation
-
-Every GitHub release bundle includes:
-
-- the compiled binary
-- default config
-- bundled themes
-- bundled locales
-- bundled assets
-- an install script
-- a `.sha256` checksum file
-
-Release workflow for a new version:
-
-```bash
-git commit -am "release: prepare v0.0.2-rc1"
-git tag v0.0.2-rc1
-git push origin master --tags
-```
-
-The release workflow validates that the pushed tag matches the version declared in `Cargo.toml`.
-
-After extracting a release bundle:
-
-On Linux and macOS:
-
-```bash
-./scripts/install.sh
-```
-
-On Windows:
-
-```powershell
-.\scripts\install.ps1
-```
-
-Installer targets by platform:
-
-- Linux: config in `~/.config/armando`, data/assets in `~/.local/share/armando`, desktop integration in `~/.local/share/applications` and icon directories
-- macOS: config and assets in `~/Library/Application Support/armando`
-- Windows: config in `%APPDATA%\armando`, data/assets in `%LOCALAPPDATA%\armando`
-
-## Configuration
+## Configure It
 
 The repository ships defaults under [`configs/`](configs), [`themes/`](themes), and [`locales/`](locales).
-
-The app looks for configuration in the platform-standard config directory for `armando`, with this structure:
+After installation, `armando` reads configuration from the platform-standard config directory for `armando`, with this structure:
 
 ```text
 armando/
@@ -93,32 +36,31 @@ armando/
 ```
 
 The ChatGPT backend uses OpenAI's Responses API.
+For exact install paths and first configuration on each OS, see [`INSTALL.md`](INSTALL.md).
 
-## Development
+## Keyboard Shortcuts
 
-Project notes are available in the [`.ai/`](.ai) folder:
+System-level shortcuts are supported on Linux, macOS, and Windows.
+The release bundle does not yet provide one built-in universal global hotkey that registers itself identically on every OS, so shortcut setup is still delegated to the operating system.
 
-- [Product](.ai/PRODUCT.md)
-- [Architecture](.ai/ARCHITECTURE.md)
-- [Status](.ai/STATUS.md)
-- [Roadmap](.ai/ROADMAP.md)
+Use [`SHORTCUTS.md`](SHORTCUTS.md) for the practical setup steps.
 
-## CI And Local Docker Testing
+## Public Docs
 
-The repository includes:
+- Install and first setup: [`INSTALL.md`](INSTALL.md)
+- Keyboard shortcuts: [`SHORTCUTS.md`](SHORTCUTS.md)
+- Releases, versions, and artifacts: [`RELEASES.md`](RELEASES.md)
+- Repository map: [`STRUCTURE.md`](STRUCTURE.md)
 
-- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for containerized validation on pushes and pull requests
-- [`.github/workflows/release.yml`](.github/workflows/release.yml) for tagged release builds and artifacts
+## Local Validation
 
-Run the same Linux container test flow locally:
+The repository includes containerized validation in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and tagged release automation in [`.github/workflows/release.yml`](.github/workflows/release.yml).
+
+To run the same Linux container flow locally:
 
 ```bash
 docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
 docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/run-container-tests.sh
 ```
 
-The containerized run produces:
-
-- logs under `target/test-artifacts/`
-- a Linux release bundle under `target/dist/`
-- checksum files for the generated bundle
+This produces logs under `target/test-artifacts/` and a Linux bundle under `target/dist/`.

@@ -1,6 +1,6 @@
 FROM rust:1.88-bookworm
 
-RUN rustup component add rustfmt
+RUN rustup component add rustfmt clippy llvm-tools-preview
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

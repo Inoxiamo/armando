@@ -47,3 +47,11 @@ jobs:
           path: |
             target/dist/armando-ci-*.tar.gz
             target/dist/armando-ci-*.tar.gz.sha256
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: armando-coverage-artifacts
+          path: |
+            target/test-artifacts/coverage/*
+            target/test-artifacts/sonar/*

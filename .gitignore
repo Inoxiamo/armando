@@ -1,4 +1,5 @@
 /target
+.scannerwork/
 __pycache__/
 config.yaml
 .ai/RUST_*

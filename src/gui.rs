@@ -124,6 +124,8 @@ struct VoiceRecording {
     path: PathBuf,
 }
 
+type AsyncAvailableModels = Arc<Mutex<Vec<(String, Result<Vec<String>, String>)>>>;
+
 #[derive(Clone, PartialEq, Eq)]
 struct RequestFingerprint {
     backend: String,
@@ -199,7 +201,7 @@ pub struct AiPopupApp {
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
-    async_available_models: Arc<Mutex<Vec<(String, Result<Vec<String>, String>)>>>,
+    async_available_models: AsyncAvailableModels,
     last_completed_request: Option<RequestFingerprint>,
 }
 
@@ -1013,6 +1015,7 @@ impl eframe::App for AiPopupApp {
                         let prompt_hint = self.tr("app.prompt_hint");
                         let prompt_rows =
                             ((self.prompt_editor_height / 22.0).round() as usize).clamp(4, 28);
+                        let prompt_before_edit = self.prompt.clone();
                         let input_output = input_frame(ctx, self.theme.panel_fill).show(ui, |ui| {
                             egui::TextEdit::multiline(&mut self.prompt)
                                 .id(prompt_id)
@@ -1070,18 +1073,27 @@ impl eframe::App for AiPopupApp {
                             self.submit_prompt(ctx);
                         }
 
-                        if prompt_has_focus
-                            && ctx.input(|i| {
-                                (i.key_pressed(egui::Key::V)
-                                    && (i.modifiers.ctrl || i.modifiers.command)
-                                    && !i.modifiers.shift
-                                    && !i.modifiers.alt)
-                                    || i.events
-                                        .iter()
-                                        .any(|event| matches!(event, egui::Event::Paste(_)))
-                            })
-                        {
-                            let _ = self.try_attach_image_from_clipboard(false);
+                        let paste_shortcut_pressed = ctx.input(|i| {
+                            i.key_pressed(egui::Key::V)
+                                && (i.modifiers.ctrl || i.modifiers.command)
+                                && !i.modifiers.shift
+                                && !i.modifiers.alt
+                        });
+                        let paste_action = ctx.input(|i| classify_prompt_paste_events(&i.events));
+
+                        if prompt_has_focus {
+                            if let Some(path) = paste_action.image_path_from_paste {
+                                if let Ok(attachment) = load_image_attachment_from_path(&path) {
+                                    self.attachments.push(attachment);
+                                    self.prompt = prompt_before_edit.clone();
+                                }
+                            } else if should_attach_clipboard_image_from_shortcut(
+                                paste_shortcut_pressed,
+                                &prompt_before_edit,
+                                &self.prompt,
+                            ) {
+                                let _ = self.try_attach_image_from_clipboard(false);
+                            }
                         }
 
                         if !self.attachments.is_empty() {
@@ -2201,6 +2213,7 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn provider_settings_section(
     app: &mut AiPopupApp,
     ctx: &egui::Context,
@@ -2313,6 +2326,7 @@ fn settings_text_field(
     ui.add(edit).changed()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn settings_model_field(
     ui: &mut egui::Ui,
     theme: &ResolvedTheme,
@@ -2478,6 +2492,37 @@ fn extract_image_path_from_clipboard_text(text: &str) -> Option<PathBuf> {
     None
 }
 
+#[derive(Debug, Default)]
+struct PromptPasteAction {
+    saw_text_paste_event: bool,
+    image_path_from_paste: Option<PathBuf>,
+}
+
+fn classify_prompt_paste_events(events: &[egui::Event]) -> PromptPasteAction {
+    let mut action = PromptPasteAction::default();
+
+    for event in events {
+        let egui::Event::Paste(text) = event else {
+            continue;
+        };
+
+        action.saw_text_paste_event = true;
+        if action.image_path_from_paste.is_none() {
+            action.image_path_from_paste = extract_image_path_from_clipboard_text(text);
+        }
+    }
+
+    action
+}
+
+fn should_attach_clipboard_image_from_shortcut(
+    paste_shortcut_pressed: bool,
+    prompt_before_edit: &str,
+    prompt_after_edit: &str,
+) -> bool {
+    paste_shortcut_pressed && prompt_before_edit == prompt_after_edit
+}
+
 fn load_image_attachment_from_system_clipboard_commands() -> Option<ImageAttachment> {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -2629,6 +2674,7 @@ fn command_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn history_entry_card(
     copy_label: &str,
     reuse_label: &str,
@@ -2809,7 +2855,7 @@ fn get_primary_selection() -> Result<String, String> {
 
     // Fallback to x11
     if let Ok(output) = std::process::Command::new("xclip")
-        .args(&["-o", "-selection", "primary"])
+        .args(["-o", "-selection", "primary"])
         .output()
     {
         if output.status.success() {
@@ -2924,4 +2970,54 @@ fn lighten(color: egui::Color32, amount: f32) -> egui::Color32 {
 
 fn color32(r: u8, g: u8, b: u8) -> egui::Color32 {
     egui::Color32::from_rgb(r, g, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_prompt_paste_events_detects_plain_text_paste() {
+        let action =
+            classify_prompt_paste_events(&[egui::Event::Paste("hello from clipboard".to_string())]);
+
+        assert!(action.saw_text_paste_event);
+        assert!(action.image_path_from_paste.is_none());
+    }
+
+    #[test]
+    fn classify_prompt_paste_events_detects_image_path_paste() {
+        let temp_dir = std::env::temp_dir().join(format!("armando-paste-{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let image_path = temp_dir.join("clipboard-image.png");
+        std::fs::write(&image_path, b"png").unwrap();
+
+        let action = classify_prompt_paste_events(&[egui::Event::Paste(
+            image_path.to_string_lossy().into_owned(),
+        )]);
+
+        assert!(action.saw_text_paste_event);
+        assert_eq!(action.image_path_from_paste, Some(image_path.clone()));
+
+        let _ = std::fs::remove_file(&image_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn should_attach_clipboard_image_when_shortcut_does_not_change_prompt() {
+        assert!(should_attach_clipboard_image_from_shortcut(
+            true,
+            "existing prompt",
+            "existing prompt",
+        ));
+    }
+
+    #[test]
+    fn should_not_attach_clipboard_image_when_prompt_changed() {
+        assert!(!should_attach_clipboard_image_from_shortcut(
+            true,
+            "before",
+            "before pasted text",
+        ));
+    }
 }

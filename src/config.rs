@@ -41,13 +41,13 @@ pub struct UiConfig {
     pub language: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct LoggingConfig {
     #[serde(default)]
     pub enabled: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct HistoryConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -58,18 +58,6 @@ impl Default for UiConfig {
         Self {
             language: default_language(),
         }
-    }
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
-
-impl Default for HistoryConfig {
-    fn default() -> Self {
-        Self { enabled: false }
     }
 }
 

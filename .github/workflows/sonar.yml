@@ -1,0 +1,39 @@
+name: Sonar
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sonar:
+    name: Sonar Scan
+    runs-on: ubuntu-latest
+    if: ${{ secrets.SONAR_TOKEN != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy, llvm-tools-preview
+
+      - name: Generate clippy and coverage reports
+        shell: bash
+        run: |
+          chmod +x scripts/export-clippy-sonar-report.sh
+          chmod +x scripts/export-rust-coverage.sh
+          scripts/export-clippy-sonar-report.sh
+          scripts/export-rust-coverage.sh
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
