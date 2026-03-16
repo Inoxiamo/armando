@@ -46,6 +46,16 @@ Every GitHub release bundle includes:
 - an install script
 - a `.sha256` checksum file
 
+Release workflow for a new version:
+
+```bash
+git commit -am "release: prepare v0.0.2-rc1"
+git tag v0.0.2-rc1
+git push origin master --tags
+```
+
+The release workflow validates that the pushed tag matches the version declared in `Cargo.toml`.
+
 After extracting a release bundle:
 
 On Linux and macOS:

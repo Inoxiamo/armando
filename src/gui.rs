@@ -20,14 +20,7 @@ use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn display_version() -> String {
-    let mut parts = APP_VERSION.split('.');
-    let major = parts.next().unwrap_or("0");
-    let minor = parts.next().unwrap_or("0");
-    let patch = parts
-        .next()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0);
-    format!("{major}.{minor}.{patch:02}")
+    APP_VERSION.to_string()
 }
 
 fn load_toolbar_icon_textures(ctx: &egui::Context) -> HashMap<ToolbarIcon, egui::TextureHandle> {
