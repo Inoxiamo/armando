@@ -1,0 +1,36 @@
+# armando — Central configuration
+# Installed by default into ~/.config/armando/configs/default.yaml
+
+default_backend: "chatgpt"
+auto_read_selection: true
+
+theme:
+  name: "nerv-hud"
+  # path: "/absolute/path/to/custom-theme.yaml"
+
+ui:
+  language: "it"
+
+logging:
+  enabled: false
+
+aliases:
+  GMAIL: "Riformula il testo seguente per renderlo adatto a una email lavorativa formale ma amichevole:"
+  SLACK: "Riformula il testo seguente per un messaggio su Slack informale e conciso:"
+  ENG: "Traduci in Inglese il testo seguente, mantenendo il tono professionale:"
+
+gemini:
+  api_key: "YOUR_GEMINI_API_KEY"
+  model: "gemini-1.5-flash"
+
+chatgpt:
+  api_key: "YOUR_OPENAI_API_KEY"
+  model: "gpt-4o-mini"
+
+claude:
+  api_key: "YOUR_ANTHROPIC_API_KEY"
+  model: "claude-3-5-sonnet-latest"
+
+ollama:
+  base_url: "http://localhost:11434"
+  model: "gemma3:1b"

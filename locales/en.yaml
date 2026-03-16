@@ -48,6 +48,8 @@ strings:
   settings.default_backend: "Default backend"
   settings.version: "Version"
   settings.general: "General"
+  settings.debug_logging: "Enable debug logging"
+  settings.debug_logging_warning: "Not recommended outside debugging because requests, context, and errors may be written to a local log file."
   settings.health: "Health Check"
   settings.models: "Models and keys"
   settings.gemini_key: "Gemini API key"

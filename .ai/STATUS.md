@@ -21,6 +21,7 @@
 - Prompt preparation optimized for cleanup, rewriting, translation, and text adaptation
 - UI toggle between text-assist mode and generic-question mode
 - Optional checkbox to keep an in-memory chat session inside the current popup run
+- Optional debug logging for requests and errors, disabled by default and intended only for diagnostics
 - Image attachments from file picker
 - Screenshot/image paste from clipboard
 - Voice dictation flow with microphone recording and OpenAI transcription
@@ -41,6 +42,7 @@
 - Clipboard screenshots are converted to PNG and attached directly from the UI
 - Voice dictation records microphone audio through `ffmpeg` or `arecord` when available, then appends the transcription to the prompt
 - When chat session mode is enabled, previous popup turns are reused as conversational context for the next request
+- Debug logging can be enabled from config or UI and writes local request/error events only when explicitly turned on
 - History reloads when the panel is opened and after every successful response
 - The history list uses its own scroll region, separate from the rest of the UI
 - Opening history expands the window downward through native viewport sizing so the panel remains visible
@@ -63,6 +65,7 @@
 - Window icon visibility may still vary by desktop environment even when the app id and desktop entry are aligned
 - Voice dictation currently depends on system audio capture tools and an OpenAI API key for transcription
 - Image support depends on the selected backend model actually being vision-capable
+- Debug logging may capture sensitive request content and should stay disabled unless actively troubleshooting
 
 ## Immediate Priorities
 

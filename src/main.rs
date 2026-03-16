@@ -4,6 +4,7 @@ mod config;
 mod gui;
 mod history;
 mod i18n;
+mod logging;
 mod theme;
 
 use eframe::egui;

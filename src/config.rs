@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::app_paths;
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct GeminiConfig {
     pub api_key: String,
@@ -10,6 +12,12 @@ pub struct GeminiConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ChatGptConfig {
+    pub api_key: String,
+    pub model: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ClaudeConfig {
     pub api_key: String,
     pub model: String,
 }
@@ -27,6 +35,32 @@ pub struct ThemeConfig {
     pub path: Option<PathBuf>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UiConfig {
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LoggingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            language: default_language(),
+        }
+    }
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
 impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
@@ -38,38 +72,29 @@ impl Default for ThemeConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
-    #[serde(default = "default_hotkey")]
-    pub hotkey: String,
-
     pub aliases: Option<HashMap<String, String>>,
 
-    // New Settings
     #[serde(default = "default_auto_read_selection")]
     pub auto_read_selection: bool,
-    #[serde(default = "default_paste_response_shortcut")]
-    pub paste_response_shortcut: String,
 
     #[serde(default = "default_backend")]
     pub default_backend: String,
     #[serde(default)]
     pub theme: ThemeConfig,
+    #[serde(default)]
+    pub ui: UiConfig,
+    #[serde(default)]
+    pub logging: LoggingConfig,
     pub gemini: Option<GeminiConfig>,
     pub chatgpt: Option<ChatGptConfig>,
+    pub claude: Option<ClaudeConfig>,
     pub ollama: Option<OllamaConfig>,
     #[serde(skip)]
     pub loaded_from: Option<PathBuf>,
 }
 
-fn default_hotkey() -> String {
-    "<ctrl>+<space>".to_string()
-}
-
 fn default_auto_read_selection() -> bool {
     true
-}
-
-fn default_paste_response_shortcut() -> String {
-    "<ctrl>+<enter>".to_string()
 }
 
 fn default_backend() -> String {
@@ -77,30 +102,16 @@ fn default_backend() -> String {
 }
 
 fn default_theme_name() -> String {
-    "nerv-hud".to_string()
+    "default-dark".to_string()
+}
+
+fn default_language() -> String {
+    "en".to_string()
 }
 
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
-        let mut paths_to_try = Vec::new();
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(parent) = exe_path.parent() {
-                // Prefer a config shipped next to the executable.
-                paths_to_try.push(parent.join("config.yaml"));
-                // Fallback for cargo run (target/debug/...)
-                if let Some(grandparent) = parent.parent().and_then(|p| p.parent()) {
-                    paths_to_try.push(grandparent.join("config.yaml"));
-                }
-            }
-        }
-
-        paths_to_try.push(std::env::current_dir()?.join("config.yaml"));
-
-        if let Some(config_dir) = dirs::config_dir() {
-            paths_to_try.push(config_dir.join("test-popup-ai").join("config.yaml"));
-        }
-
-        for path in paths_to_try {
+        for path in app_paths::candidate_config_paths()? {
             if path.exists() {
                 log::info!("Loading config from {}", path.display());
                 let content = std::fs::read_to_string(&path)?;
@@ -110,7 +121,27 @@ impl Config {
             }
         }
 
-        anyhow::bail!("config.yaml not found in any of the expected locations.");
+        anyhow::bail!(
+            "No configuration file found. Expected `configs/default.yaml` or legacy `config.yaml` in the standard application locations."
+        );
+    }
+
+    pub fn save(&mut self) -> anyhow::Result<()> {
+        let path = self
+            .loaded_from
+            .clone()
+            .unwrap_or(app_paths::default_config_path()?);
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let mut serializable = self.clone();
+        serializable.loaded_from = None;
+        let content = serde_yaml::to_string(&serializable)?;
+        std::fs::write(&path, content)?;
+        self.loaded_from = Some(path);
+        Ok(())
     }
 }
 
@@ -119,9 +150,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn theme_config_defaults_to_nerv_hud() {
+    fn theme_config_defaults_to_default_dark() {
         let theme = ThemeConfig::default();
-        assert_eq!(theme.name, "nerv-hud");
+        assert_eq!(theme.name, "default-dark");
         assert!(theme.path.is_none());
     }
 
@@ -138,10 +169,10 @@ mod tests {
         let yaml = "{}";
         let config: Config = serde_yaml::from_str(yaml).unwrap();
 
-        assert_eq!(config.hotkey, "<ctrl>+<space>");
-        assert_eq!(config.paste_response_shortcut, "<ctrl>+<enter>");
         assert_eq!(config.default_backend, "ollama");
         assert!(config.auto_read_selection);
-        assert_eq!(config.theme.name, "nerv-hud");
+        assert_eq!(config.theme.name, "default-dark");
+        assert_eq!(config.ui.language, "en");
+        assert!(!config.logging.enabled);
     }
 }

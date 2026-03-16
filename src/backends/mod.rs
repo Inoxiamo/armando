@@ -5,6 +5,7 @@ pub mod ollama;
 
 use crate::config::Config;
 use crate::history;
+use crate::logging;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +51,7 @@ pub struct HealthCheck {
 }
 
 pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: PromptMode) -> String {
+    logging::log_request(config, backend, input);
     let prepared_prompt = prepare_prompt(
         &input.prompt,
         &input.conversation,
@@ -67,6 +69,7 @@ pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: Pro
 
     match res {
         Ok(text) => {
+            logging::log_success(config, backend, input, &text);
             if let Ok(entry) = history::new_entry(backend, &input.prompt, &text) {
                 let _ = history::append_entry(entry);
             }
@@ -74,6 +77,7 @@ pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: Pro
         }
         Err(e) => {
             log::error!("{} error: {:?}", backend, e);
+            logging::log_error(config, backend, input, &e.to_string());
             format!("❌ {} error: {}", backend, e)
         }
     }

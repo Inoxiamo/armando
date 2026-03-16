@@ -19,7 +19,7 @@
   Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, optional in-memory chat session state, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
 
 - `src/config.rs`
-  Defines the YAML configuration schema, persistence behavior, and config path resolution.
+  Defines the YAML configuration schema, persistence behavior, and config path resolution, including opt-in debug logging.
 
 - `src/history.rs`
   Manages local history persistence, 7-day retention, selective deletion, and `history.jsonl` lookup.
@@ -35,6 +35,9 @@
 
 - `src/backends/*`
   Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude, including multimodal image payload mapping.
+
+- `src/logging.rs`
+  Handles opt-in local debug logging for request, success, and error events.
 
 - `scripts/install-local.sh`
   Builds the release binary and installs the user-local binary, config, themes, locales, icon, and desktop entry.
@@ -57,10 +60,11 @@
 8. Voice dictation records to a temporary audio file and sends it to OpenAI transcription before appending text to the prompt
 9. The user submits a prompt
 10. An async task queries the selected backend
-11. Successful responses are appended to local history
-12. The response is rendered in the popup
-13. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
-14. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+11. If debug logging is enabled, the app appends request and outcome events to a local JSONL log file
+12. Successful responses are appended to local history
+13. The response is rendered in the popup
+14. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
+15. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
 
 ## UI Structure
 

@@ -1436,6 +1436,20 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
                     app.persist_settings();
                 }
 
+                ui.add_space(8.0);
+                let mut debug_logging = app.config.logging.enabled;
+                if ui
+                    .checkbox(&mut debug_logging, app.tr("settings.debug_logging"))
+                    .changed()
+                {
+                    app.config.logging.enabled = debug_logging;
+                    app.persist_settings();
+                }
+                ui.label(muted_label(
+                    &app.tr("settings.debug_logging_warning"),
+                    app.theme.weak_text_color,
+                ));
+
                 ui.add_space(12.0);
                 ui.label(section_label(
                     &app.tr("settings.models"),
