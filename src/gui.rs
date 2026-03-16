@@ -454,7 +454,13 @@ impl AiPopupApp {
         if self.show_history {
             self.reload_history();
         }
-        sync_history_viewport(ctx, self.show_history);
+        sync_main_viewport(ctx, self.show_history, self.show_settings);
+        ctx.request_repaint();
+    }
+
+    fn set_settings_visibility(&mut self, ctx: &egui::Context, visible: bool) {
+        self.show_settings = visible;
+        sync_main_viewport(ctx, self.show_history, self.show_settings);
         ctx.request_repaint();
     }
 
@@ -705,7 +711,7 @@ impl eframe::App for AiPopupApp {
         // Handle global Esc to close
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             if self.show_settings {
-                self.show_settings = false;
+                self.set_settings_visibility(ctx, false);
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -788,7 +794,7 @@ impl eframe::App for AiPopupApp {
                                         secondary_action_button("⚙", self.theme.panel_fill_soft)
                                             .min_size(egui::vec2(34.0, 34.0));
                                     if ui.add(gear).on_hover_text(settings_open_label).clicked() {
-                                        self.show_settings = !self.show_settings;
+                                        self.set_settings_visibility(ctx, !self.show_settings);
                                     }
                                 },
                             );
@@ -1471,25 +1477,11 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
                     ))
                     .clicked()
                 {
-                    app.show_settings = false;
+                    app.set_settings_visibility(ctx, false);
                 }
             });
         });
-
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label(muted_label(
-                &app.tr("settings.version"),
-                app.theme.weak_text_color,
-            ));
-            ui.label(
-                egui::RichText::new(format!("v{}", display_version()))
-                    .small()
-                    .color(app.theme.weak_text_color),
-            );
-        });
-
-        ui.add_space(8.0);
+        ui.add_space(10.0);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -1763,10 +1755,22 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
                 }
 
                 ui.add_space(8.0);
-                ui.label(muted_label(
-                    &app.tr("settings.saved"),
-                    app.theme.weak_text_color,
-                ));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(muted_label(
+                        &app.tr("settings.saved"),
+                        app.theme.weak_text_color,
+                    ));
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} v{}",
+                            app.tr("settings.version"),
+                            display_version()
+                        ))
+                        .small()
+                        .color(app.theme.weak_text_color),
+                    );
+                });
             });
     });
 }
@@ -2196,16 +2200,35 @@ fn history_entry_card(
     });
 }
 
-fn sync_history_viewport(ctx: &egui::Context, show_history: bool) {
+fn sync_main_viewport(ctx: &egui::Context, show_history: bool, show_settings: bool) {
     const BASE_MIN_WIDTH: f32 = 620.0;
     const BASE_MIN_HEIGHT: f32 = 420.0;
+    const SETTINGS_MIN_WIDTH: f32 = 980.0;
     const HISTORY_MIN_HEIGHT: f32 = 620.0;
 
-    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(if show_history {
-        egui::vec2(BASE_MIN_WIDTH, HISTORY_MIN_HEIGHT)
+    let min_width = if show_settings {
+        SETTINGS_MIN_WIDTH
     } else {
-        egui::vec2(BASE_MIN_WIDTH, BASE_MIN_HEIGHT)
-    }));
+        BASE_MIN_WIDTH
+    };
+    let min_height = if show_history {
+        HISTORY_MIN_HEIGHT
+    } else {
+        BASE_MIN_HEIGHT
+    };
+
+    let desired_size = egui::vec2(min_width, min_height);
+    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(desired_size));
+
+    if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
+        let current_size = current_rect.size();
+        if current_size.x < desired_size.x || current_size.y < desired_size.y {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                current_size.x.max(desired_size.x),
+                current_size.y.max(desired_size.y),
+            )));
+        }
+    }
 }
 
 fn trim_for_preview(text: &str, max_chars: usize) -> String {

@@ -28,6 +28,7 @@
 - Main prompt and response actions now live in compact toolbars near their respective editors instead of large text buttons below the prompt
 - Prompt and response editors can now be resized directly with the mouse by dragging their lower edge
 - Provider configuration sections are closed by default in settings, including the Ollama URL/model section
+- The settings panel version label now lives in the footer instead of consuming space at the top of the panel
 - Image attachments from file picker
 - Screenshot/image paste from clipboard
 - Voice dictation flow with microphone recording and OpenAI transcription
@@ -53,6 +54,7 @@
 - Each provider model field remains editable by hand, but clicking it can also load a provider-specific list of available models and expose it as a dropdown picker
 - Ollama shows infinite local availability, while cloud backends currently surface `n/d` because this app cannot read a dependable remaining-credit balance from those providers
 - The Ollama base URL remains editable in settings and changing it invalidates the cached model list so the next refresh reads from the new server
+- Opening the settings panel now expands the viewport width when needed so the main prompt/response preview does not get squeezed into a broken narrow layout
 - Prompt actions are grouped directly in the prompt header, while copy/history controls are grouped in the response header for a shorter interaction path
 - Toolbar actions now prefer short text badges over emoji-style glyphs to avoid broken icons on systems with limited font fallback
 - History reloads when enabled, when the panel is opened, and after every successful response

@@ -69,8 +69,9 @@
 14. The user can change theme, language, backend, models, credentials, history, and debug settings from the settings panel with immediate persistence
 15. Provider sections stay collapsed by default and can asynchronously load model lists from the configured backend, including the currently editable Ollama base URL
 16. The settings panel also surfaces a lightweight credit-availability indicator: `∞` for local Ollama usage and `n/d` for cloud providers whose remaining balance is not exposed through this integration
-17. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
-18. Downloaded release bundles can be installed directly through the bundled platform-specific install scripts
+17. Opening the settings side panel can widen the viewport when needed so the main content area keeps a usable preview width
+18. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+19. Downloaded release bundles can be installed directly through the bundled platform-specific install scripts
 
 ## UI Structure
 
