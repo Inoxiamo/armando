@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=armando
+Comment=Lightweight desktop AI popup
+Exec=${HOME}/.local/bin/armando
+Icon=armando
+StartupWMClass=armando
+StartupNotify=true
+Terminal=false
+Categories=Utility;Office;

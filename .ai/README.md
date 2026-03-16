@@ -1,33 +1,44 @@
 # Project Context
 
-Questa cartella contiene il contesto operativo del progetto in formato sintetico e professionale.
-Va usata come base per onboarding, manutenzione e pianificazione.
+This folder is the canonical documentation hub for the project.
+Use it as the default entry point for onboarding, maintenance, planning, and release prep.
 
-## Documenti
+## Documents
 
-- `PRODUCT.md`: obiettivi prodotto, use case, vincoli e valore del progetto
-- `ARCHITECTURE.md`: panoramica tecnica, componenti principali e flussi runtime
-- `STATUS.md`: stato corrente, funzionalita presenti, gap noti e priorita immediate
-- `ROADMAP.md`: roadmap per milestone con focus su rilascio e qualita
+- `PRODUCT.md`: product goals, use cases, constraints, and value proposition
+- `ARCHITECTURE.md`: technical overview, main components, and runtime flows
+- `STATUS.md`: current behavior, implemented capabilities, known gaps, and immediate priorities
+- `ROADMAP.md`: milestone-based roadmap focused on product maturity and distribution
+- `RUST_GUIDE_FOR_JAVA_PYTHON.md`: quick orientation guide for reading this Rust codebase if you come from Java or Python
 
-## Regole di aggiornamento
+## Repository Structure
 
-- Aggiornare `STATUS.md` quando cambia il comportamento reale del prodotto
-- Aggiornare `ARCHITECTURE.md` quando vengono introdotti nuovi componenti o flussi
-- Aggiornare `ROADMAP.md` quando una priorita cambia o viene completata
-- Mantenere `PRODUCT.md` stabile, salvo cambiamenti di visione o target
+- `src/`: application code, UI, config, history, i18n, theming, and backend integrations
+- `themes/`: shipped theme presets loaded at runtime from YAML
+- `locales/`: shipped UI translations loaded at runtime from YAML
+- `configs/`: default user-facing configuration templates
+- `scripts/`: local install and release packaging helpers
+- `assets/`: desktop integration assets such as the app icon and `.desktop` entry
+- `.ai/`: living project documentation for product, architecture, status, and roadmap
 
-## Regole operative
+## Update Rules
 
-- Prima di modificare il codice, leggere lo stato corrente in `.ai/STATUS.md`
-- Ogni cambiamento UX o funzionale deve lasciare allineati codice e documentazione in `.ai`
-- Non versionare segreti o configurazioni locali: `config.yaml` resta locale e non va committato
-- Usare commit message in formato Conventional Commits, ad esempio `feat: improve history panel`
-- Preferire commit piccoli e coerenti, uno per modifica significativa completata e verificata
-- Eseguire almeno `cargo build` prima di chiudere una modifica che tocca codice Rust
-- Aggiornare `STATUS.md` per bug fix percepibili dall'utente e `ROADMAP.md` quando una priorita viene assorbita o ridefinita
+- Update `STATUS.md` whenever user-visible behavior changes
+- Update `ARCHITECTURE.md` when new components, paths, or runtime flows are introduced
+- Update `ROADMAP.md` when priorities change or milestones are completed
+- Keep `PRODUCT.md` relatively stable unless product direction or audience changes
 
-## Stato sintetico
+## Working Rules
 
-Il progetto e un popup AI desktop in Rust/egui con backend multipli, hotkey globali e supporto a configurazione YAML.
-L'obiettivo corrente e consolidare il flusso "ask -> receive -> apply", rendere la history realmente utile e migliorare l'interfaccia con un'identita visiva forte (`NERV HUD` come default).
+- Read `.ai/STATUS.md` before making code changes
+- Keep code and `.ai` documentation aligned after every UX or functional change
+- Do not commit secrets or local-only configuration files
+- Use Conventional Commits such as `feat: improve history panel`
+- Prefer small, coherent commits with verified scope
+- Run at least `cargo build` before closing changes that touch Rust code
+- Reflect user-visible fixes in `STATUS.md` and roadmap shifts in `ROADMAP.md`
+
+## Snapshot
+
+The project is a Rust/egui desktop AI popup with multiple backends, YAML-based configuration, external themes, external locales, and persistent local history.
+The current focus is to strengthen the "ask -> receive -> apply" workflow, make history genuinely useful, tighten visual consistency across the popup, and finish desktop-ready installation details such as icon and launcher integration.

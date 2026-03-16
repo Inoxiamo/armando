@@ -2,52 +2,60 @@
 
 ## Implemented
 
-- Popup AI desktop richiamabile da hotkey
-- Supporto a backend `ollama`, `chatgpt`, `gemini`
-- Configurazione YAML centralizzata
-- Lettura automatica del testo selezionato
-- Alias per prompt contestuali
-- Copia risposta negli appunti
-- Shortcut `Ctrl+Enter` per apply/copy-and-close
-- Sistema di temi configurabile
-- Temi caricati da file YAML esterni
-- Tema di default `NERV HUD`
-- Compatibilita mantenuta con i nomi tema storici `nerv-magi-system` e `magi`
-- Preprompt orientato principalmente a pulizia, ottimizzazione, traduzione e adattamento del testo
-- Toggle UI per passare da modalita text-assist a domanda generica
-- Test unitari di non regressione su prompt preparation, tag parsing, retention della history, config, theme loading e parsing hotkey
-- History locale persistente con retention a 7 giorni
-- Filtri history per backend e testo
-- Riutilizzo e copia rapida delle entry dalla history
-- Finestra ridimensionabile con decorazioni native
+- Desktop AI popup that can be launched directly from the operating system
+- Support for `ollama`, `chatgpt`, `gemini`, and `claude` backends
+- Centralized YAML configuration
+- Automatic selected-text capture
+- Prompt aliases for contextual workflows
+- Copy-to-clipboard for responses
+- Configurable theming system
+- Themes loaded from external YAML files
+- UI localization loaded from external YAML files
+- Settings panel with real-time persistence for theme, language, backend, models, and credentials
+- Build version displayed in the settings panel
+- Active `NERV HUD` theme with revised palette
+- Compatibility preserved for legacy theme names `nerv-magi-system` and `magi`
+- Unified dropdown styling across the main popup, settings panel, and history filter
+- Settings gear aligned to the right side of the top toolbar
+- Project icon integrated both in the native viewport and in the local desktop installation assets
+- Prompt preparation optimized for cleanup, rewriting, translation, and text adaptation
+- UI toggle between text-assist mode and generic-question mode
+- Regression-oriented unit tests for prompt preparation, tag parsing, history retention, config loading, and theme loading
+- Persistent local history with 7-day retention
+- History filters by backend and text
+- Fast reuse and copy actions from history entries
+- Multi-select and deletion for history entries
+- Resizable window with native decorations
+- Direct UI startup without a background daemon mode
 
 ## Current Behavior Notes
 
-- `Ctrl+Enter` esegue auto-apply se il sistema dispone delle utility richieste
-- Se l'iniezione tastiera non e disponibile, la risposta viene comunque copiata e la UI informa l'utente
-- Il tema viene applicato da `config.yaml` all'apertura della UI
-- La history viene ricaricata all'apertura del pannello e dopo ogni risposta completata con successo
-- La lista history usa un'area scroll dedicata separata dallo scroll del resto della finestra
-- L'apertura della history espande nativamente la finestra verso il basso per evitare che il pannello resti nascosto
-- L'espansione della history e limitata alla dimensione utile del monitor per evitare stretch eccessivi
-- Le azioni principali sono etichettate in modo esplicito per evitare pulsanti ambigui
-- Il testo sui pulsanti accentati e configurabile via `accent_text_color` nel file tema
-- Il comportamento di default dell'assistente privilegia output testuali pronti da riapplicare subito
-- In modalita `Generic question`, il prompt viene trattato come domanda diretta e non come testo da formattare
-- In modalita `Generic question`, il tag `CMD` richiede solo il comando finale; senza `CMD`, la risposta viene formattata in Markdown
+- Theme and language are applied from config at startup and can be changed live
+- Backend dropdowns use plain backend names without extra per-provider symbols
+- History reloads when the panel is opened and after every successful response
+- The history list uses its own scroll region, separate from the rest of the UI
+- Opening history expands the window downward through native viewport sizing so the panel remains visible
+- History expansion is capped to the usable monitor space to avoid excessive stretching
+- Primary actions use explicit labels to avoid ambiguous buttons
+- Text on accent buttons is configurable through `accent_text_color` in the theme file
+- Local installation places the binary, shipped themes, shipped locales, desktop icon, and `.desktop` launcher entry in the user profile
+- Default assistant behavior prefers output that can be reapplied immediately
+- In `Generic question` mode, the prompt is treated as a direct question rather than text to rewrite
+- In `Generic question` mode, the `CMD` tag requests only the final command; without `CMD`, the answer is formatted as Markdown
 
 ## Known Gaps
 
-- Nessuna GUI per modificare la configurazione
-- Nessun supporto a streaming token-by-token
-- Nessuna diagnostica visuale per dipendenze OS mancanti prima del tentativo di apply
-- Nessuna distinzione tra history di sessione singola e history persistente
-- Mancano test automatici UI per layout, scroll e interazioni del popup
+- No token-by-token streaming yet
+- No startup-time visual diagnostics for backend/config health
+- No distinction yet between session-only history and persistent history
+- No automated UI tests for layout, scrolling, and popup interactions
+- No safe terminal or MCP tool integration yet
+- Window icon visibility may still vary by desktop environment even when the app id and desktop entry are aligned
 
 ## Immediate Priorities
 
-- Rendere l'auto-apply ancora piu osservabile e affidabile
-- Consolidare la nuova UI history con feedback piu ricchi e metadati migliori
-- Migliorare ulteriormente l'identita visiva `NERV HUD`
-- Definire un setup UX piu chiaro per Wayland/X11
-- Consolidare la documentazione per installazione e troubleshooting
+- Consolidate the new settings/history UI with richer feedback and better metadata
+- Continue refining the `NERV HUD` visual identity
+- Add diagnostics and health checks for backend/config issues
+- Finish packaging, release notes, and cross-platform stabilization work
+- Evaluate a beta tools mode for terminal/CLI/MCP behind explicit confirmation

@@ -1,18 +1,28 @@
 use eframe::egui;
 use egui::text::{CCursor, CCursorRange};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 use crate::backends;
 use crate::backends::PromptMode;
+use crate::backends::{HealthCheck, HealthLevel};
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
-use crate::theme::ResolvedTheme;
+use crate::i18n::{available_locales, I18n, LocaleDefinition};
+use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
 
-enum PasteOutcome {
-    Applied,
-    ClipboardOnly,
-    Unavailable,
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn display_version() -> String {
+    let mut parts = APP_VERSION.split('.');
+    let major = parts.next().unwrap_or("0");
+    let minor = parts.next().unwrap_or("0");
+    let patch = parts
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    format!("{major}.{minor}.{patch:02}")
 }
 
 pub struct AiPopupApp {
@@ -25,15 +35,23 @@ pub struct AiPopupApp {
     response: String,
     selected_backend: String,
     is_loading: bool,
-    auto_paste_on_finish: bool,
     prompt_focus_initialized: bool,
     generic_question_mode: bool,
+    session_history_entries: Vec<HistoryEntry>,
     history_entries: Vec<HistoryEntry>,
     history_error: Option<String>,
     show_history: bool,
+    selected_history_entries: HashSet<String>,
     history_filter_backend: String,
     history_filter_query: String,
     history_action_error: Option<String>,
+    settings_error: Option<String>,
+    settings_notice: Option<String>,
+    show_settings: bool,
+    pending_submission: Option<(String, String)>,
+    available_themes: Vec<String>,
+    available_locales: Vec<LocaleDefinition>,
+    i18n: I18n,
 
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
@@ -48,6 +66,7 @@ impl AiPopupApp {
     ) -> Self {
         let style = build_style(&theme);
         cc.egui_ctx.set_style(style);
+        let i18n = I18n::load(&config.ui.language).unwrap_or_else(|_| I18n::load("en").unwrap());
 
         let default_backend = config.default_backend.clone();
 
@@ -66,6 +85,8 @@ impl AiPopupApp {
             Err(err) => (Vec::new(), Some(err.to_string())),
         };
 
+        let fallback_theme_name = config.theme.name.clone();
+
         Self {
             config,
             theme,
@@ -74,20 +95,28 @@ impl AiPopupApp {
             response: String::new(),
             selected_backend: default_backend,
             is_loading: false,
-            auto_paste_on_finish: false,
             prompt_focus_initialized: false,
             generic_question_mode: false,
+            session_history_entries: Vec::new(),
             history_entries,
             history_error,
             show_history: false,
+            selected_history_entries: HashSet::new(),
             history_filter_backend: "all".to_string(),
             history_filter_query: String::new(),
             history_action_error: None,
+            settings_error: None,
+            settings_notice: None,
+            show_settings: false,
+            pending_submission: None,
+            available_themes: available_theme_names().unwrap_or_else(|_| vec![fallback_theme_name]),
+            available_locales: available_locales().unwrap_or_default(),
+            i18n,
             async_response: Arc::new(Mutex::new(None)),
         }
     }
 
-    fn check_async_response(&mut self, ctx: &egui::Context) {
+    fn check_async_response(&mut self, _ctx: &egui::Context) {
         let res = {
             let mut resp_lock = self.async_response.lock().unwrap();
             resp_lock.take()
@@ -98,27 +127,16 @@ impl AiPopupApp {
             match res {
                 Ok(text) => {
                     self.response = text;
-                    self.reload_history();
-                    if self.auto_paste_on_finish {
-                        match close_and_paste(ctx, self.response.clone()) {
-                            PasteOutcome::Applied => {}
-                            PasteOutcome::ClipboardOnly => {
-                                self.response.push_str(
-                                    "\n\n[nota] Risposta copiata negli appunti. Per applicarla automaticamente su Linux serve `wtype` (Wayland) oppure `xdotool` (X11).",
-                                );
-                            }
-                            PasteOutcome::Unavailable => {
-                                self.response.push_str(
-                                    "\n\n[nota] Auto-apply non disponibile: installa `wl-copy` + `wtype` su Wayland oppure `xclip` + `xdotool` su X11.",
-                                );
-                            }
+                    if let Some((backend, prompt)) = self.pending_submission.take() {
+                        if let Ok(entry) = history::new_entry(&backend, &prompt, &self.response) {
+                            self.session_history_entries.insert(0, entry);
                         }
-                        self.auto_paste_on_finish = false;
                     }
+                    self.reload_history();
                 }
                 Err(e) => {
                     self.response = format!("Error: {}", e);
-                    self.auto_paste_on_finish = false;
+                    self.pending_submission = None;
                 }
             }
         }
@@ -142,6 +160,7 @@ impl AiPopupApp {
         let config = self.config.clone();
         let async_response = self.async_response.clone();
         let ctx = ctx.clone();
+        self.pending_submission = Some((backend.clone(), prompt.clone()));
 
         // Spawn async task
         self.runtime.spawn(async move {
@@ -159,11 +178,87 @@ impl AiPopupApp {
         match history::recent_entries() {
             Ok(entries) => {
                 self.history_entries = entries;
+                self.session_history_entries.retain(|entry| {
+                    let entry_id = history::entry_id(entry);
+                    self.history_entries
+                        .iter()
+                        .any(|persisted| history::entry_id(persisted) == entry_id)
+                });
+                self.selected_history_entries.retain(|id| {
+                    self.history_entries
+                        .iter()
+                        .any(|entry| history::entry_id(entry) == *id)
+                        || self
+                            .session_history_entries
+                            .iter()
+                            .any(|entry| history::entry_id(entry) == *id)
+                });
                 self.history_error = None;
                 self.history_action_error = None;
             }
             Err(err) => {
                 self.history_error = Some(err.to_string());
+            }
+        }
+    }
+
+    fn delete_selected_history_entries(&mut self) {
+        if self.selected_history_entries.is_empty() {
+            return;
+        }
+
+        let ids: Vec<String> = self.selected_history_entries.iter().cloned().collect();
+        match history::delete_entries(&ids) {
+            Ok(()) => {
+                self.session_history_entries
+                    .retain(|entry| !ids.iter().any(|id| id == &history::entry_id(entry)));
+                self.selected_history_entries.clear();
+                self.reload_history();
+            }
+            Err(err) => {
+                self.history_action_error = Some(err.to_string());
+            }
+        }
+    }
+
+    fn select_all_visible_history_entries(&mut self) {
+        for entry in &self.session_history_entries {
+            self.selected_history_entries
+                .insert(history::entry_id(entry));
+        }
+        for entry in self.filtered_history_entries() {
+            self.selected_history_entries
+                .insert(history::entry_id(&entry));
+        }
+    }
+
+    fn delete_all_visible_history_entries(&mut self) {
+        let mut ids: Vec<String> = self
+            .session_history_entries
+            .iter()
+            .map(history::entry_id)
+            .collect();
+        ids.extend(
+            self.filtered_history_entries()
+                .iter()
+                .map(history::entry_id),
+        );
+        ids.sort();
+        ids.dedup();
+
+        if ids.is_empty() {
+            return;
+        }
+
+        match history::delete_entries(&ids) {
+            Ok(()) => {
+                self.session_history_entries
+                    .retain(|entry| !ids.iter().any(|id| id == &history::entry_id(entry)));
+                self.selected_history_entries.clear();
+                self.reload_history();
+            }
+            Err(err) => {
+                self.history_action_error = Some(err.to_string());
             }
         }
     }
@@ -193,128 +288,189 @@ impl AiPopupApp {
         sync_history_viewport(ctx, self.show_history);
         ctx.request_repaint();
     }
+
+    fn tr(&self, key: &str) -> String {
+        self.i18n.tr(key)
+    }
+
+    fn tr_with(&self, key: &str, pairs: &[(&str, String)]) -> String {
+        let mut value = self.tr(key);
+        for (name, replacement) in pairs {
+            value = value.replace(&format!("{{{name}}}"), replacement);
+        }
+        value
+    }
+
+    fn ensure_config_sections(&mut self) {
+        if self.config.gemini.is_none() {
+            self.config.gemini = Some(crate::config::GeminiConfig {
+                api_key: String::new(),
+                model: "gemini-flash-latest".to_string(),
+            });
+        }
+        if self.config.chatgpt.is_none() {
+            self.config.chatgpt = Some(crate::config::ChatGptConfig {
+                api_key: String::new(),
+                model: "gpt-4o-mini".to_string(),
+            });
+        }
+        if self.config.claude.is_none() {
+            self.config.claude = Some(crate::config::ClaudeConfig {
+                api_key: String::new(),
+                model: "claude-3-5-sonnet-latest".to_string(),
+            });
+        }
+        if self.config.ollama.is_none() {
+            self.config.ollama = Some(crate::config::OllamaConfig {
+                base_url: "http://localhost:11434".to_string(),
+                model: "gemma3:1b".to_string(),
+            });
+        }
+    }
+
+    fn apply_theme_by_name(&mut self, ctx: &egui::Context, name: &str) {
+        match load_theme_by_name(name, self.config.loaded_from.as_deref()) {
+            Ok(theme) => {
+                self.config.theme.name = name.to_string();
+                self.config.theme.path = None;
+                self.theme = theme.clone();
+                ctx.set_style(build_style(&theme));
+                self.settings_error = None;
+            }
+            Err(err) => {
+                self.settings_error =
+                    Some(self.tr_with("app.settings_save_error", &[("error", err.to_string())]));
+            }
+        }
+    }
+
+    fn apply_language(&mut self, language: &str) {
+        match I18n::load(language) {
+            Ok(i18n) => {
+                self.config.ui.language = language.to_string();
+                self.i18n = i18n;
+                self.settings_error = None;
+            }
+            Err(err) => {
+                self.settings_error =
+                    Some(self.tr_with("app.settings_save_error", &[("error", err.to_string())]));
+            }
+        }
+    }
+
+    fn persist_settings(&mut self) {
+        match self.config.save() {
+            Ok(()) => {
+                self.settings_notice = Some(self.tr("app.settings_save_ok"));
+                self.settings_error = None;
+            }
+            Err(err) => {
+                self.settings_error =
+                    Some(self.tr_with("app.settings_save_error", &[("error", err.to_string())]));
+            }
+        }
+    }
 }
 
 impl eframe::App for AiPopupApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.check_async_response(ctx);
+        self.ensure_config_sections();
 
         // Handle global Esc to close
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-
-        // Handle Paste & Close hotkey (default: Ctrl+Enter)
-        // We parse our standard config <ctrl>+<enter> into egui checking
-        let paste_pressed = {
-            let s = self.config.paste_response_shortcut.to_lowercase();
-            let mut mods = egui::Modifiers::NONE;
-            if s.contains("ctrl") {
-                mods.ctrl = true;
-            }
-            if s.contains("shift") {
-                mods.shift = true;
-            }
-            if s.contains("alt") {
-                mods.alt = true;
-            }
-
-            let key = if s.contains("enter") {
-                egui::Key::Enter
-            } else if s.contains("space") {
-                egui::Key::Space
+            if self.show_settings {
+                self.show_settings = false;
             } else {
-                egui::Key::Enter
-            }; // fallback
-
-            shortcut_pressed(ctx, mods, key)
-        };
-
-        if paste_pressed {
-            if !self.response.is_empty() && !self.is_loading {
-                match close_and_paste(ctx, self.response.clone()) {
-                    PasteOutcome::Applied => {}
-                    PasteOutcome::ClipboardOnly => {
-                        self.response.push_str(
-                            "\n\n[nota] Risposta copiata negli appunti. Per applicarla automaticamente su Linux serve `wtype` (Wayland) oppure `xdotool` (X11).",
-                        );
-                    }
-                    PasteOutcome::Unavailable => {
-                        self.response.push_str(
-                            "\n\n[nota] Auto-apply non disponibile: installa `wl-copy` + `wtype` su Wayland oppure `xclip` + `xdotool` su X11.",
-                        );
-                    }
-                }
-            } else if !self.prompt.trim().is_empty() {
-                self.auto_paste_on_finish = true;
-                if !self.is_loading {
-                    self.submit_prompt(ctx);
-                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
 
         let frame = egui::Frame::none()
             .fill(ctx.style().visuals.window_fill)
-            .stroke(ctx.style().visuals.window_stroke)
-            .rounding(ctx.style().visuals.window_rounding)
-            .inner_margin(egui::Margin::same(0.0));
+            .inner_margin(egui::Margin::same(14.0));
+
+        if self.show_settings {
+            egui::SidePanel::right("settings_panel")
+                .resizable(false)
+                .default_width(320.0)
+                .frame(card_frame(
+                    ctx,
+                    self.theme.panel_fill_raised,
+                    self.theme.border_color,
+                ))
+                .show(ctx, |ui| {
+                    render_settings_panel(self, ctx, ui);
+                });
+        }
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
-            let panel_frame = card_frame(
-                ctx,
-                self.theme.panel_fill_raised,
-                self.theme.border_color,
-            );
-
-            panel_frame
-                .fill(self.theme.panel_fill_raised)
-                .inner_margin(egui::Margin::same(12.0))
+            egui::ScrollArea::vertical()
+                .id_source("main_content_scroll")
+                .auto_shrink([false; 2])
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_source("main_content_scroll")
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
                     ui.vertical(|ui| {
+                        let all_backends = self.tr("app.all_backends");
+                        let backend_label = self.tr("app.backend");
+                        let generic_mode_label = self.tr("app.generic_mode");
+                        let settings_open_label = self.tr("app.settings_open");
+
                         ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new("AI Assistant")
-                                        .strong()
-                                        .size(21.0)
-                                        .color(ctx.style().visuals.hyperlink_color),
-                                );
-                                ui.label(
-                                    egui::RichText::new("Fast prompts, polished history, instant apply.")
-                                        .small()
-                                        .color(self.theme.weak_text_color),
-                                );
-                            });
-
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                egui::ComboBox::from_id_source("backend_combo")
-                                    .selected_text(&self.selected_backend)
-                                    .width(132.0)
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut self.selected_backend, "ollama".to_string(), "ollama");
-                                        ui.selectable_value(&mut self.selected_backend, "chatgpt".to_string(), "chatgpt");
-                                        ui.selectable_value(&mut self.selected_backend, "gemini".to_string(), "gemini");
-                                    });
-                                ui.label(egui::RichText::new("Backend").strong());
-                            });
+                            ui.label(muted_label(&backend_label, self.theme.weak_text_color));
+                            let backend_button =
+                                dropdown_button_text(&self.selected_backend, &self.theme);
+                            egui::ComboBox::from_id_source("backend_combo")
+                                .selected_text(backend_button)
+                                .width(148.0)
+                                .show_ui(ui, |ui| {
+                                    apply_dropdown_menu_style(ui, &self.theme);
+                                    dropdown_option(
+                                        ui,
+                                        &mut self.selected_backend,
+                                        "ollama",
+                                        &self.theme,
+                                    );
+                                    dropdown_option(
+                                        ui,
+                                        &mut self.selected_backend,
+                                        "chatgpt",
+                                        &self.theme,
+                                    );
+                                    dropdown_option(
+                                        ui,
+                                        &mut self.selected_backend,
+                                        "claude",
+                                        &self.theme,
+                                    );
+                                    dropdown_option(
+                                        ui,
+                                        &mut self.selected_backend,
+                                        "gemini",
+                                        &self.theme,
+                                    );
+                                });
+                            ui.add_space(6.0);
+                            ui.checkbox(&mut self.generic_question_mode, generic_mode_label);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let gear =
+                                        secondary_action_button("⚙", self.theme.panel_fill_soft)
+                                            .min_size(egui::vec2(34.0, 34.0));
+                                    if ui.add(gear).on_hover_text(settings_open_label).clicked() {
+                                        self.show_settings = !self.show_settings;
+                                    }
+                                },
+                            );
                         });
-
                         ui.add_space(10.0);
 
                         let prompt_id = ui.make_persistent_id("prompt_input");
-                        let input_output = card_frame(
-                            ctx,
-                            darken(ctx.style().visuals.panel_fill, 0.08),
-                            ctx.style().visuals.hyperlink_color,
-                        )
-                        .show(ui, |ui| {
+                        let prompt_hint = self.tr("app.prompt_hint");
+                        let input_output = input_frame(ctx, self.theme.panel_fill).show(ui, |ui| {
                             egui::TextEdit::multiline(&mut self.prompt)
                                 .id(prompt_id)
-                                .hint_text("Write your prompt here...")
+                                .hint_text(prompt_hint)
                                 .desired_width(f32::INFINITY)
                                 .desired_rows(4)
                                 .show(ui)
@@ -326,37 +482,37 @@ impl eframe::App for AiPopupApp {
                             input_resp.request_focus();
 
                             let mut state = input_output.state.clone();
-                            state
-                                .cursor
-                                .set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(0))));
+                            state.cursor.set_char_range(Some(CCursorRange::two(
+                                CCursor::new(0),
+                                CCursor::new(0),
+                            )));
                             state.store(ctx, prompt_id);
 
                             self.prompt_focus_initialized = true;
                             ctx.request_repaint();
                         }
 
-                        if input_resp.has_focus() {
-                            if ctx.input(|i| {
+                        if input_resp.has_focus()
+                            && ctx.input(|i| {
                                 i.key_pressed(egui::Key::Enter)
                                     && !i.modifiers.shift
                                     && !i.modifiers.ctrl
                                     && !i.modifiers.alt
                                     && !i.modifiers.command
-                            }) {
-                                self.submit_prompt(ctx);
-                            }
+                            })
+                        {
+                            self.submit_prompt(ctx);
                         }
 
                         ui.add_space(8.0);
-
                         ui.horizontal_wrapped(|ui| {
                             let helper_text = if self.is_loading {
-                                format!("Waiting for {}...", self.selected_backend)
-                            } else {
-                                format!(
-                                    "Enter sends, Shift+Enter adds a newline, Esc closes, {} pastes and closes.",
-                                    self.config.paste_response_shortcut
+                                self.tr_with(
+                                    "app.helper_waiting",
+                                    &[("backend", self.selected_backend.clone())],
                                 )
+                            } else {
+                                self.tr("app.helper_ready")
                             };
                             ui.label(
                                 egui::RichText::new(helper_text)
@@ -365,44 +521,29 @@ impl eframe::App for AiPopupApp {
                             );
                         });
 
-                        ui.add_space(6.0);
-
-                        ui.checkbox(&mut self.generic_question_mode, "Generic question mode");
-
-                        ui.add_space(6.0);
-
+                        ui.add_space(10.0);
                         ui.horizontal_wrapped(|ui| {
                             let history_count = self.history_entries.len();
                             let history_label = if self.show_history {
-                                format!("Hide History ({})", history_count)
+                                self.tr_with(
+                                    "app.hide_history",
+                                    &[("count", history_count.to_string())],
+                                )
                             } else {
-                                format!("Show History ({})", history_count)
+                                self.tr_with(
+                                    "app.show_history",
+                                    &[("count", history_count.to_string())],
+                                )
                             };
-                            let primary_button = primary_action_button(
-                                "Send Prompt",
-                                self.theme.accent_color,
-                                self.theme.border_color,
-                                self.theme.accent_text_color,
-                            );
-                            let copy_button = secondary_action_button(
-                                "Copy Response",
-                                self.theme.panel_fill_soft,
-                                self.theme.border_color,
-                            );
-                            let history_button = toggle_action_button(
-                                &history_label,
-                                if self.show_history {
-                                    self.theme.panel_fill_soft
-                                } else {
-                                    self.theme.panel_fill
-                                },
-                                self.theme.accent_color,
-                            );
 
                             if ui
                                 .add_enabled(
                                     !self.is_loading,
-                                    primary_button,
+                                    primary_action_button(
+                                        &self.tr("app.send"),
+                                        self.theme.accent_color,
+                                        self.theme.accent_text_color,
+                                    ),
                                 )
                                 .clicked()
                             {
@@ -410,7 +551,13 @@ impl eframe::App for AiPopupApp {
                             }
 
                             if ui
-                                .add_enabled(!self.response.is_empty(), copy_button)
+                                .add_enabled(
+                                    !self.response.is_empty(),
+                                    secondary_action_button(
+                                        &self.tr("app.copy_response"),
+                                        self.theme.panel_fill,
+                                    ),
+                                )
                                 .clicked()
                             {
                                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -418,31 +565,59 @@ impl eframe::App for AiPopupApp {
                                 }
                             }
 
-                            if ui.add(history_button).clicked() {
+                            if ui
+                                .add(toggle_action_button(
+                                    &history_label,
+                                    if self.show_history {
+                                        self.theme.panel_fill_soft
+                                    } else {
+                                        self.theme.panel_fill
+                                    },
+                                ))
+                                .clicked()
+                            {
                                 self.set_history_visibility(ctx, !self.show_history);
                             }
                         });
 
                         if let Some(path) = &self.config.loaded_from {
-                            ui.add_space(4.0);
+                            ui.add_space(8.0);
                             ui.label(
-                                egui::RichText::new(format!("Config: {}", path.display()))
-                                    .small()
-                                    .weak(),
+                                egui::RichText::new(self.tr_with(
+                                    "app.config_path",
+                                    &[("path", path.display().to_string())],
+                                ))
+                                .small()
+                                .color(self.theme.weak_text_color),
                             );
                         }
 
-                        ui.add_space(10.0);
+                        if let Some(notice) = &self.settings_notice {
+                            ui.label(muted_label(notice, self.theme.weak_text_color));
+                        }
+                        if let Some(error) = &self.settings_error {
+                            ui.colored_label(self.theme.danger_color, error);
+                        }
 
-                        ui.label(section_label(ctx, "Response"));
-                        ui.add_space(4.0);
-                        card_frame(
-                            ctx,
-                            self.theme.panel_fill_soft,
-                            self.theme.border_color,
-                        )
-                        .show(ui, |ui| {
-                            let response_height = if self.show_history { 150.0 } else { 250.0 };
+                        ui.add_space(14.0);
+                        ui.horizontal(|ui| {
+                            ui.label(section_label(
+                                &self.tr("app.response"),
+                                self.theme.text_color,
+                            ));
+                            if self.is_loading {
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new(self.tr("app.generating"))
+                                        .small()
+                                        .color(self.theme.weak_text_color),
+                                );
+                            }
+                        });
+                        ui.add_space(6.0);
+
+                        input_frame(ctx, self.theme.panel_fill).show(ui, |ui| {
+                            let response_height = if self.show_history { 160.0 } else { 230.0 };
                             egui::ScrollArea::vertical()
                                 .auto_shrink([false; 2])
                                 .max_height(response_height)
@@ -456,180 +631,672 @@ impl eframe::App for AiPopupApp {
                         });
 
                         if self.show_history {
-                            ui.add_space(12.0);
-                            ui.label(section_label(ctx, "History"));
+                            ui.add_space(14.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(section_label(
+                                    &self.tr("app.history"),
+                                    self.theme.text_color,
+                                ));
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new(self.tr("app.last_7_days"))
+                                        .small()
+                                        .color(self.theme.weak_text_color),
+                                );
+                            });
                             ui.add_space(6.0);
 
-                            card_frame(
-                                ctx,
-                                self.theme.panel_fill_soft,
-                                self.theme.border_color,
-                            )
-                            .show(ui, |ui| {
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("Last 7 days")
-                                            .small()
-                                            .color(self.theme.weak_text_color),
+                            card_frame(ctx, self.theme.panel_fill, self.theme.border_color).show(
+                                ui,
+                                |ui| {
+                                    let history_search_hint = self.tr("app.search_history");
+                                    let open_history_label = self.tr("app.open_history_file");
+                                    let select_all_label = self.tr("app.select_all");
+                                    let delete_all_label = self.tr("app.delete_all");
+                                    let delete_selected_label = self.tr_with(
+                                        "app.delete_selected",
+                                        &[(
+                                            "count",
+                                            self.selected_history_entries.len().to_string(),
+                                        )],
                                     );
-
-                                    let open_button = secondary_action_button(
-                                        "Open History File",
-                                        self.theme.panel_fill_raised,
-                                        self.theme.border_color,
-                                    );
-                                    if ui.add(open_button).clicked() {
-                                        self.history_action_error =
-                                            open_history_file().err().map(|err| err.to_string());
-                                    }
-                                });
-
-                                ui.add_space(6.0);
-                                ui.horizontal_wrapped(|ui| {
-                                    egui::ComboBox::from_id_source("history_backend_filter")
-                                        .selected_text(match self.history_filter_backend.as_str() {
-                                            "all" => "All backends",
-                                            "chatgpt" => "chatgpt",
-                                            "gemini" => "gemini",
-                                            "ollama" => "ollama",
-                                            _ => "All backends",
-                                        })
-                                        .width(150.0)
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(&mut self.history_filter_backend, "all".to_string(), "All backends");
-                                            ui.selectable_value(&mut self.history_filter_backend, "chatgpt".to_string(), "chatgpt");
-                                            ui.selectable_value(&mut self.history_filter_backend, "gemini".to_string(), "gemini");
-                                            ui.selectable_value(&mut self.history_filter_backend, "ollama".to_string(), "ollama");
-                                        });
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut self.history_filter_query)
-                                            .hint_text("Search prompt or response...")
-                                            .desired_width(260.0),
-                                    );
-                                });
-
-                                if let Some(error) = &self.history_error {
-                                    ui.add_space(4.0);
-                                    ui.colored_label(self.theme.danger_color, error);
-                                } else if let Some(error) = &self.history_action_error {
-                                    ui.add_space(4.0);
-                                    ui.colored_label(self.theme.danger_color, error);
-                                }
-
-                                ui.add_space(8.0);
-
-                                let entries = self.filtered_history_entries();
-                                if entries.is_empty() {
-                                    ui.label("No recent history yet. Send a prompt and it will appear here.");
-                                } else {
-                                    let history_height = ui.available_height().clamp(240.0, 360.0);
-                                    egui::ScrollArea::vertical()
-                                        .id_source("history_entries_scroll")
-                                        .auto_shrink([false; 2])
-                                        .max_height(history_height)
-                                        .show(ui, |ui| {
-                                            for (index, entry) in entries.iter().enumerate() {
-                                                history_entry_card(
-                                                    ui,
-                                                    ctx,
-                                                    &self.theme,
-                                                    entry,
-                                                    &mut self.prompt,
-                                                    &mut self.response,
-                                                    &mut self.show_history,
-                                                    &mut self.prompt_focus_initialized,
-                                                    &mut self.history_action_error,
+                                    ui.horizontal_wrapped(|ui| {
+                                        egui::ComboBox::from_id_source("history_backend_filter")
+                                            .selected_text(
+                                                match self.history_filter_backend.as_str() {
+                                                    "all" => dropdown_button_text(
+                                                        all_backends.as_str(),
+                                                        &self.theme,
+                                                    ),
+                                                    "chatgpt" => {
+                                                        dropdown_button_text("chatgpt", &self.theme)
+                                                    }
+                                                    "claude" => {
+                                                        dropdown_button_text("claude", &self.theme)
+                                                    }
+                                                    "gemini" => {
+                                                        dropdown_button_text("gemini", &self.theme)
+                                                    }
+                                                    "ollama" => {
+                                                        dropdown_button_text("ollama", &self.theme)
+                                                    }
+                                                    _ => dropdown_button_text(
+                                                        all_backends.as_str(),
+                                                        &self.theme,
+                                                    ),
+                                                },
+                                            )
+                                            .width(150.0)
+                                            .show_ui(ui, |ui| {
+                                                apply_dropdown_menu_style(ui, &self.theme);
+                                                ui.selectable_value(
+                                                    &mut self.history_filter_backend,
+                                                    "all".to_string(),
+                                                    dropdown_item_text(
+                                                        all_backends.as_str(),
+                                                        &self.theme,
+                                                    ),
                                                 );
-                                                if index + 1 < entries.len() {
-                                                    ui.add_space(8.0);
+                                                dropdown_option(
+                                                    ui,
+                                                    &mut self.history_filter_backend,
+                                                    "chatgpt",
+                                                    &self.theme,
+                                                );
+                                                dropdown_option(
+                                                    ui,
+                                                    &mut self.history_filter_backend,
+                                                    "claude",
+                                                    &self.theme,
+                                                );
+                                                dropdown_option(
+                                                    ui,
+                                                    &mut self.history_filter_backend,
+                                                    "gemini",
+                                                    &self.theme,
+                                                );
+                                                dropdown_option(
+                                                    ui,
+                                                    &mut self.history_filter_backend,
+                                                    "ollama",
+                                                    &self.theme,
+                                                );
+                                            });
+                                        ui.add(
+                                            egui::TextEdit::singleline(
+                                                &mut self.history_filter_query,
+                                            )
+                                            .hint_text(history_search_hint)
+                                            .desired_width(280.0),
+                                        );
+                                        if ui
+                                            .add(secondary_action_button(
+                                                &open_history_label,
+                                                self.theme.panel_fill_soft,
+                                            ))
+                                            .clicked()
+                                        {
+                                            self.history_action_error = open_history_file()
+                                                .err()
+                                                .map(|err| err.to_string());
+                                        }
+                                        if ui
+                                            .add(secondary_action_button(
+                                                &select_all_label,
+                                                self.theme.panel_fill_soft,
+                                            ))
+                                            .clicked()
+                                        {
+                                            self.select_all_visible_history_entries();
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                !self.selected_history_entries.is_empty(),
+                                                secondary_action_button(
+                                                    &delete_selected_label,
+                                                    self.theme.panel_fill_soft,
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.delete_selected_history_entries();
+                                        }
+                                        if ui
+                                            .add(secondary_action_button(
+                                                &delete_all_label,
+                                                self.theme.panel_fill_soft,
+                                            ))
+                                            .clicked()
+                                        {
+                                            self.delete_all_visible_history_entries();
+                                        }
+                                    });
+
+                                    if let Some(error) = &self.history_error {
+                                        ui.add_space(8.0);
+                                        ui.colored_label(self.theme.danger_color, error);
+                                    } else if let Some(error) = &self.history_action_error {
+                                        ui.add_space(8.0);
+                                        ui.colored_label(self.theme.danger_color, error);
+                                    }
+
+                                    ui.add_space(10.0);
+
+                                    if !self.session_history_entries.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new(self.tr("app.session_history"))
+                                                .strong()
+                                                .color(self.theme.text_color),
+                                        );
+                                        ui.add_space(6.0);
+
+                                        for entry in self.session_history_entries.iter().take(5) {
+                                            history_entry_card(
+                                                &self.tr("app.copy_result"),
+                                                &self.tr("app.reuse_entry"),
+                                                &self.tr("app.select_entry"),
+                                                &self.tr("app.history_prompt"),
+                                                &self.tr("app.history_response"),
+                                                ui,
+                                                ctx,
+                                                &self.theme,
+                                                entry,
+                                                &mut self.selected_history_entries,
+                                                &mut self.prompt,
+                                                &mut self.response,
+                                                &mut self.show_history,
+                                                &mut self.prompt_focus_initialized,
+                                                &mut self.history_action_error,
+                                            );
+                                            ui.add_space(8.0);
+                                        }
+
+                                        ui.separator();
+                                        ui.add_space(10.0);
+                                    }
+
+                                    let entries = self.filtered_history_entries();
+                                    if entries.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new(self.tr("app.no_history"))
+                                                .color(self.theme.weak_text_color),
+                                        );
+                                    } else {
+                                        let history_height =
+                                            ui.available_height().clamp(240.0, 380.0);
+                                        egui::ScrollArea::vertical()
+                                            .id_source("history_entries_scroll")
+                                            .auto_shrink([false; 2])
+                                            .max_height(history_height)
+                                            .show(ui, |ui| {
+                                                for (index, entry) in entries.iter().enumerate() {
+                                                    history_entry_card(
+                                                        &self.tr("app.copy_result"),
+                                                        &self.tr("app.reuse_entry"),
+                                                        &self.tr("app.select_entry"),
+                                                        &self.tr("app.history_prompt"),
+                                                        &self.tr("app.history_response"),
+                                                        ui,
+                                                        ctx,
+                                                        &self.theme,
+                                                        entry,
+                                                        &mut self.selected_history_entries,
+                                                        &mut self.prompt,
+                                                        &mut self.response,
+                                                        &mut self.show_history,
+                                                        &mut self.prompt_focus_initialized,
+                                                        &mut self.history_action_error,
+                                                    );
+                                                    if index + 1 < entries.len() {
+                                                        ui.add_space(10.0);
+                                                    }
                                                 }
-                                            }
-                                        });
-                                }
-                            });
+                                            });
+                                    }
+                                },
+                            );
                         }
                     });
-                        });
                 });
         });
     }
 }
 
-fn section_label(ctx: &egui::Context, text: &str) -> egui::RichText {
-    egui::RichText::new(text)
-        .strong()
-        .size(15.0)
-        .color(ctx.style().visuals.hyperlink_color)
+fn section_label(text: &str, color: egui::Color32) -> egui::RichText {
+    egui::RichText::new(text).strong().size(15.0).color(color)
+}
+
+fn muted_label(text: &str, color: egui::Color32) -> egui::RichText {
+    egui::RichText::new(text).small().color(color)
+}
+
+fn dropdown_button_text(text: &str, theme: &ResolvedTheme) -> egui::RichText {
+    egui::RichText::new(text).color(theme.text_color).strong()
+}
+
+fn dropdown_item_text(text: &str, theme: &ResolvedTheme) -> egui::RichText {
+    egui::RichText::new(text).color(theme.text_color)
+}
+
+fn dropdown_option(
+    ui: &mut egui::Ui,
+    selected: &mut String,
+    value: &str,
+    theme: &ResolvedTheme,
+) -> egui::Response {
+    ui.selectable_value(
+        selected,
+        value.to_string(),
+        dropdown_item_text(value, theme),
+    )
+}
+
+fn apply_dropdown_menu_style(ui: &mut egui::Ui, theme: &ResolvedTheme) {
+    let visuals = ui.visuals_mut();
+    visuals.selection.bg_fill = lighten(theme.panel_fill_soft, 0.06);
+    visuals.selection.stroke = egui::Stroke::new(1.0, theme.border_color.gamma_multiply(0.35));
+    visuals.widgets.inactive.bg_fill = theme.panel_fill_raised;
+    visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0, theme.border_color.gamma_multiply(0.14));
+    visuals.widgets.hovered.bg_fill = lighten(theme.panel_fill_raised, 0.03);
+    visuals.widgets.hovered.bg_stroke =
+        egui::Stroke::new(1.0, theme.border_color.gamma_multiply(0.22));
+    visuals.widgets.active.bg_fill = lighten(theme.panel_fill_raised, 0.05);
+    visuals.widgets.active.bg_stroke =
+        egui::Stroke::new(1.0, theme.border_color.gamma_multiply(0.28));
+    visuals.widgets.open = visuals.widgets.hovered;
 }
 
 fn primary_action_button<'a>(
     label: &'a str,
     fill: egui::Color32,
-    stroke: egui::Color32,
     text_color: egui::Color32,
 ) -> egui::Button<'a> {
     egui::Button::new(egui::RichText::new(label).strong().color(text_color))
         .fill(fill)
-        .stroke(egui::Stroke::new(1.0, stroke))
-        .rounding(egui::Rounding::same(7.0))
-        .min_size(egui::vec2(138.0, 34.0))
+        .stroke(egui::Stroke::NONE)
+        .rounding(egui::Rounding::same(10.0))
+        .min_size(egui::vec2(126.0, 34.0))
 }
 
-fn secondary_action_button<'a>(
-    label: &'a str,
-    fill: egui::Color32,
-    stroke: egui::Color32,
-) -> egui::Button<'a> {
+fn secondary_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::Button<'a> {
     egui::Button::new(egui::RichText::new(label).strong())
         .fill(fill)
-        .stroke(egui::Stroke::new(1.0, stroke))
-        .rounding(egui::Rounding::same(7.0))
-        .min_size(egui::vec2(120.0, 34.0))
+        .stroke(egui::Stroke::NONE)
+        .rounding(egui::Rounding::same(10.0))
+        .min_size(egui::vec2(118.0, 34.0))
 }
 
-fn toggle_action_button<'a>(
-    label: &'a str,
-    fill: egui::Color32,
-    stroke: egui::Color32,
-) -> egui::Button<'a> {
+fn toggle_action_button<'a>(label: &'a str, fill: egui::Color32) -> egui::Button<'a> {
     egui::Button::new(egui::RichText::new(label).strong())
         .fill(fill)
-        .stroke(egui::Stroke::new(1.0, stroke))
-        .rounding(egui::Rounding::same(7.0))
-        .min_size(egui::vec2(148.0, 34.0))
+        .stroke(egui::Stroke::NONE)
+        .rounding(egui::Rounding::same(10.0))
+        .min_size(egui::vec2(136.0, 34.0))
 }
 
 fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -> egui::Frame {
     egui::Frame::none()
         .fill(fill)
-        .stroke(egui::Stroke::new(1.0, stroke))
-        .rounding(egui::Rounding::same(10.0))
+        .stroke(egui::Stroke::new(1.0, stroke.gamma_multiply(0.08)))
+        .rounding(egui::Rounding::same(14.0))
         .shadow(egui::epaint::Shadow {
-            offset: egui::vec2(0.0, 8.0),
+            offset: egui::vec2(0.0, 6.0),
             blur: 18.0,
             spread: 0.0,
             color: egui::Color32::from_black_alpha(if ctx.style().visuals.dark_mode {
-                72
+                24
             } else {
-                36
+                10
             }),
         })
         .inner_margin(egui::Margin::same(10.0))
 }
 
+fn input_frame(ctx: &egui::Context, fill: egui::Color32) -> egui::Frame {
+    egui::Frame::none()
+        .fill(fill)
+        .stroke(egui::Stroke::new(1.0, fill))
+        .rounding(egui::Rounding::same(12.0))
+        .shadow(egui::epaint::Shadow {
+            offset: egui::vec2(0.0, 2.0),
+            blur: 8.0,
+            spread: 0.0,
+            color: egui::Color32::from_black_alpha(if ctx.style().visuals.dark_mode {
+                8
+            } else {
+                4
+            }),
+        })
+        .inner_margin(egui::Margin::same(8.0))
+}
+
+fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(section_label(&app.tr("app.settings"), app.theme.text_color));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(secondary_action_button(
+                        &app.tr("settings.close"),
+                        app.theme.panel_fill_soft,
+                    ))
+                    .clicked()
+                {
+                    app.show_settings = false;
+                }
+            });
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(muted_label(
+                &app.tr("settings.version"),
+                app.theme.weak_text_color,
+            ));
+            ui.label(
+                egui::RichText::new(format!("v{}", display_version()))
+                    .small()
+                    .color(app.theme.weak_text_color),
+            );
+        });
+
+        ui.add_space(8.0);
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.label(section_label(
+                    &app.tr("settings.general"),
+                    app.theme.text_color,
+                ));
+
+                ui.label(muted_label(
+                    &app.tr("settings.language"),
+                    app.theme.weak_text_color,
+                ));
+                let current_language = app
+                    .available_locales
+                    .iter()
+                    .find(|locale| locale.code == app.i18n.code())
+                    .map(|locale| locale.name.clone())
+                    .unwrap_or_else(|| app.i18n.language_name().to_string());
+                egui::ComboBox::from_id_source("settings_language")
+                    .selected_text(dropdown_button_text(&current_language, &app.theme))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        apply_dropdown_menu_style(ui, &app.theme);
+                        let locales: Vec<(String, String)> = app
+                            .available_locales
+                            .iter()
+                            .map(|locale| (locale.code.clone(), locale.name.clone()))
+                            .collect();
+                        for (code, name) in locales {
+                            if ui
+                                .selectable_label(
+                                    app.config.ui.language == code,
+                                    dropdown_item_text(&name, &app.theme),
+                                )
+                                .clicked()
+                            {
+                                app.apply_language(&code);
+                                app.persist_settings();
+                            }
+                        }
+                    });
+
+                ui.add_space(8.0);
+                ui.label(muted_label(
+                    &app.tr("settings.theme"),
+                    app.theme.weak_text_color,
+                ));
+                let current_theme = app.config.theme.name.clone();
+                egui::ComboBox::from_id_source("settings_theme")
+                    .selected_text(dropdown_button_text(&current_theme, &app.theme))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        apply_dropdown_menu_style(ui, &app.theme);
+                        let themes = app.available_themes.clone();
+                        for theme_name in themes {
+                            if ui
+                                .selectable_label(
+                                    app.config.theme.name == theme_name,
+                                    dropdown_item_text(&theme_name, &app.theme),
+                                )
+                                .clicked()
+                            {
+                                app.apply_theme_by_name(ctx, &theme_name);
+                                app.persist_settings();
+                            }
+                        }
+                    });
+
+                ui.add_space(8.0);
+                ui.label(muted_label(
+                    &app.tr("settings.default_backend"),
+                    app.theme.weak_text_color,
+                ));
+                egui::ComboBox::from_id_source("settings_default_backend")
+                    .selected_text(dropdown_button_text(
+                        &app.config.default_backend,
+                        &app.theme,
+                    ))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        apply_dropdown_menu_style(ui, &app.theme);
+                        for backend in ["ollama", "chatgpt", "claude", "gemini"] {
+                            if ui
+                                .selectable_label(
+                                    app.config.default_backend == backend,
+                                    dropdown_item_text(backend, &app.theme),
+                                )
+                                .clicked()
+                            {
+                                app.config.default_backend = backend.to_string();
+                                app.selected_backend = backend.to_string();
+                                app.persist_settings();
+                            }
+                        }
+                    });
+
+                ui.add_space(8.0);
+                let mut auto_read = app.config.auto_read_selection;
+                if ui
+                    .checkbox(&mut auto_read, app.tr("settings.auto_read_selection"))
+                    .changed()
+                {
+                    app.config.auto_read_selection = auto_read;
+                    app.persist_settings();
+                }
+
+                ui.add_space(12.0);
+                ui.label(section_label(
+                    &app.tr("settings.models"),
+                    app.theme.text_color,
+                ));
+
+                let health_checks = backends::health_checks(&app.config);
+                let find_health = |backend_name: &str| {
+                    health_checks
+                        .iter()
+                        .find(|check| check.backend == backend_name)
+                        .cloned()
+                        .unwrap_or(HealthCheck {
+                            backend: backend_name.to_string(),
+                            level: HealthLevel::Warning,
+                            summary: "Unknown".to_string(),
+                            detail: "No health information available.".to_string(),
+                        })
+                };
+
+                let gemini_key_label = app.tr("settings.gemini_key");
+                let gemini_model_label = app.tr("settings.gemini_model");
+                if let Some(gemini) = app.config.gemini.as_mut() {
+                    if provider_settings_section(
+                        ui,
+                        &app.theme,
+                        "settings_provider_gemini",
+                        "gemini",
+                        &find_health("gemini"),
+                        &gemini_key_label,
+                        &gemini_model_label,
+                        &mut gemini.api_key,
+                        &mut gemini.model,
+                    ) {
+                        app.persist_settings();
+                    }
+                }
+
+                let chatgpt_key_label = app.tr("settings.chatgpt_key");
+                let chatgpt_model_label = app.tr("settings.chatgpt_model");
+                if let Some(chatgpt) = app.config.chatgpt.as_mut() {
+                    if provider_settings_section(
+                        ui,
+                        &app.theme,
+                        "settings_provider_chatgpt",
+                        "chatgpt",
+                        &find_health("chatgpt"),
+                        &chatgpt_key_label,
+                        &chatgpt_model_label,
+                        &mut chatgpt.api_key,
+                        &mut chatgpt.model,
+                    ) {
+                        app.persist_settings();
+                    }
+                }
+
+                let claude_key_label = app.tr("settings.claude_key");
+                let claude_model_label = app.tr("settings.claude_model");
+                if let Some(claude) = app.config.claude.as_mut() {
+                    if provider_settings_section(
+                        ui,
+                        &app.theme,
+                        "settings_provider_claude",
+                        "claude",
+                        &find_health("claude"),
+                        &claude_key_label,
+                        &claude_model_label,
+                        &mut claude.api_key,
+                        &mut claude.model,
+                    ) {
+                        app.persist_settings();
+                    }
+                }
+
+                let ollama_url_label = app.tr("settings.ollama_url");
+                let ollama_model_label = app.tr("settings.ollama_model");
+                if let Some(ollama) = app.config.ollama.as_mut() {
+                    if provider_settings_section(
+                        ui,
+                        &app.theme,
+                        "settings_provider_ollama",
+                        "ollama",
+                        &find_health("ollama"),
+                        &ollama_url_label,
+                        &ollama_model_label,
+                        &mut ollama.base_url,
+                        &mut ollama.model,
+                    ) {
+                        app.persist_settings();
+                    }
+                }
+
+                ui.add_space(8.0);
+                ui.label(muted_label(
+                    &app.tr("settings.saved"),
+                    app.theme.weak_text_color,
+                ));
+            });
+    });
+}
+
+fn provider_settings_section(
+    ui: &mut egui::Ui,
+    theme: &ResolvedTheme,
+    id: &str,
+    provider: &str,
+    health_check: &HealthCheck,
+    primary_label: &str,
+    secondary_label: &str,
+    primary_value: &mut String,
+    secondary_value: &mut String,
+) -> bool {
+    let mut changed = false;
+    let color = match health_check.level {
+        HealthLevel::Ok => theme.accent_color,
+        HealthLevel::Warning => egui::Color32::from_rgb(227, 177, 76),
+        HealthLevel::Error => theme.danger_color,
+    };
+    let header = egui::RichText::new(format!(
+        "{} · {}",
+        provider.to_uppercase(),
+        health_check.summary
+    ))
+    .color(color);
+
+    egui::CollapsingHeader::new(header)
+        .id_source(id)
+        .default_open(provider == "chatgpt")
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(&health_check.detail)
+                    .small()
+                    .color(theme.weak_text_color),
+            );
+            changed |= settings_text_field(ui, theme, primary_label, primary_value, true);
+            changed |= settings_text_field(ui, theme, secondary_label, secondary_value, false);
+        });
+    changed
+}
+
+fn settings_text_field(
+    ui: &mut egui::Ui,
+    theme: &ResolvedTheme,
+    label: &str,
+    value: &mut String,
+    password: bool,
+) -> bool {
+    ui.add_space(8.0);
+    ui.label(muted_label(label, theme.weak_text_color));
+    let mut edit = egui::TextEdit::singleline(value).desired_width(f32::INFINITY);
+    if password {
+        edit = edit.password(true);
+    }
+    ui.add(edit).changed()
+}
+
 fn history_entry_card(
+    copy_label: &str,
+    reuse_label: &str,
+    select_label: &str,
+    prompt_label: &str,
+    response_label: &str,
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     theme: &ResolvedTheme,
     entry: &HistoryEntry,
+    selected_history_entries: &mut HashSet<String>,
     prompt: &mut String,
     response: &mut String,
     show_history: &mut bool,
     prompt_focus_initialized: &mut bool,
     history_action_error: &mut Option<String>,
 ) {
+    let entry_id = history::entry_id(entry);
     card_frame(ctx, theme.panel_fill_raised, theme.border_color).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
+            let mut is_selected = selected_history_entries.contains(&entry_id);
+            if ui
+                .checkbox(&mut is_selected, "")
+                .on_hover_text(select_label)
+                .changed()
+            {
+                if is_selected {
+                    selected_history_entries.insert(entry_id.clone());
+                } else {
+                    selected_history_entries.remove(&entry_id);
+                }
+            }
             ui.label(
                 egui::RichText::new(entry.backend.to_uppercase())
                     .strong()
@@ -644,12 +1311,14 @@ fn history_entry_card(
         });
 
         ui.add_space(6.0);
+        ui.label(muted_label(prompt_label, theme.weak_text_color));
         ui.label(
             egui::RichText::new(trim_for_preview(&entry.prompt, 180))
                 .strong()
                 .small(),
         );
-        ui.add_space(4.0);
+        ui.add_space(6.0);
+        ui.label(muted_label(response_label, theme.weak_text_color));
         ui.label(
             egui::RichText::new(trim_for_preview(&entry.response, 260))
                 .small()
@@ -658,8 +1327,7 @@ fn history_entry_card(
         ui.add_space(8.0);
 
         ui.horizontal_wrapped(|ui| {
-            let copy_button =
-                secondary_action_button("Copy Result", theme.panel_fill_soft, theme.border_color);
+            let copy_button = secondary_action_button(copy_label, theme.panel_fill_soft);
             if ui.add(copy_button).clicked() {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     let _ = clipboard.set_text(entry.response.clone());
@@ -667,18 +1335,14 @@ fn history_entry_card(
                 *history_action_error = None;
             }
 
-            let reuse_button = primary_action_button(
-                "Reuse Entry",
-                theme.accent_color,
-                theme.border_color,
-                theme.accent_text_color,
-            );
+            let reuse_button =
+                primary_action_button(reuse_label, theme.accent_color, theme.accent_text_color);
             if ui.add(reuse_button).clicked() {
                 *prompt = entry.prompt.clone();
                 *response = entry.response.clone();
                 *show_history = false;
                 ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
-                    520.0, 360.0,
+                    620.0, 420.0,
                 )));
                 *prompt_focus_initialized = false;
                 *history_action_error = None;
@@ -689,9 +1353,9 @@ fn history_entry_card(
 }
 
 fn sync_history_viewport(ctx: &egui::Context, show_history: bool) {
-    const BASE_MIN_WIDTH: f32 = 520.0;
-    const BASE_MIN_HEIGHT: f32 = 360.0;
-    const HISTORY_MIN_HEIGHT: f32 = 520.0;
+    const BASE_MIN_WIDTH: f32 = 620.0;
+    const BASE_MIN_HEIGHT: f32 = 420.0;
+    const HISTORY_MIN_HEIGHT: f32 = 620.0;
 
     ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(if show_history {
         egui::vec2(BASE_MIN_WIDTH, HISTORY_MIN_HEIGHT)
@@ -780,105 +1444,12 @@ fn get_primary_selection() -> Result<String, String> {
     Err("Could not read selection".to_string())
 }
 
-fn simulate_paste(text: String) -> PasteOutcome {
-    // We must spawn a detached process because this process is about to exit
-    // and would take down X11/Wayland clipboard ownership with it if we used internal clipboards.
-
-    let has_wayland_pair = command_exists("wl-copy") && command_exists("wtype");
-    let has_x11_pair = command_exists("xclip") && command_exists("xdotool");
-    let has_clipboard_only = command_exists("wl-copy") || command_exists("xclip");
-
-    if !has_wayland_pair && !has_x11_pair && !has_clipboard_only {
-        return PasteOutcome::Unavailable;
-    }
-
-    let temp_dir = std::env::temp_dir();
-    let temp_file = temp_dir.join("popup_ai_paste.txt");
-    if let Err(_) = std::fs::write(&temp_file, &text) {
-        return PasteOutcome::Unavailable;
-    }
-
-    let temp_file_str = temp_file.to_string_lossy().to_string();
-
-    // Command sequence:
-    // 1. Sleep slightly to allow the popup window to close and previous window to regain focus
-    // 2. Prefer direct text injection when available
-    // 3. Fallback to clipboard priming
-    // 4. Clean up temp file
-    let script = format!(
-        "sleep 0.55; \
-        if command -v wl-copy >/dev/null 2>&1 && command -v wtype >/dev/null 2>&1; then \
-            wtype -d 1 - < '{0}' 2>/dev/null || (wl-copy --paste-once < '{0}' && sleep 0.20 && wtype -M ctrl -s 120 -k v); \
-        elif command -v xclip >/dev/null 2>&1 && command -v xdotool >/dev/null 2>&1; then \
-            xdotool type --clearmodifiers --delay 1 --file '{0}' 2>/dev/null || (xclip -selection clipboard < '{0}' && sleep 0.20 && xdotool key --clearmodifiers ctrl+v); \
-        elif command -v wl-copy >/dev/null 2>&1; then \
-            wl-copy < '{0}'; \
-        elif command -v xclip >/dev/null 2>&1; then \
-            xclip -selection clipboard < '{0}'; \
-        fi; \
-        rm -f '{0}'",
-        temp_file_str
-    );
-
-    // Spawn detached shell process
-    let mut cmd = if command_exists("setsid") {
-        let mut cmd = std::process::Command::new("setsid");
-        cmd.arg("sh").arg("-c").arg(&script);
-        cmd
-    } else {
-        let mut cmd = std::process::Command::new("sh");
-        cmd.arg("-c").arg(&script);
-        cmd
-    };
-
-    let _ = cmd.spawn();
-
-    if has_wayland_pair || has_x11_pair {
-        PasteOutcome::Applied
-    } else {
-        PasteOutcome::ClipboardOnly
-    }
-}
-
-fn close_and_paste(ctx: &egui::Context, text: String) -> PasteOutcome {
-    if command_exists("wtype")
-        || command_exists("xdotool")
-        || command_exists("wl-copy") && command_exists("wtype")
-        || command_exists("xclip") && command_exists("xdotool")
-    {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-    }
-    simulate_paste(text)
-}
-
-fn shortcut_pressed(ctx: &egui::Context, required_mods: egui::Modifiers, key: egui::Key) -> bool {
-    ctx.input(|i| {
-        let mods = i.modifiers;
-        let ctrl_ok = !required_mods.ctrl || mods.ctrl;
-        let shift_ok = !required_mods.shift || mods.shift;
-        let alt_ok = !required_mods.alt || mods.alt;
-        let command_ok = !required_mods.command || mods.command;
-        ctrl_ok && shift_ok && alt_ok && command_ok && i.key_pressed(key)
-    })
-}
-
-fn command_exists(name: &str) -> bool {
-    std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {} >/dev/null 2>&1", name))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
 fn build_style(theme: &ResolvedTheme) -> egui::Style {
     let mut style = egui::Style::default();
     let mut visuals = egui::Visuals::dark();
     style.text_styles.insert(
         egui::TextStyle::Heading,
-        egui::FontId::new(20.0, egui::FontFamily::Monospace),
+        egui::FontId::new(24.0, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
         egui::TextStyle::Body,
@@ -886,7 +1457,7 @@ fn build_style(theme: &ResolvedTheme) -> egui::Style {
     );
     style.text_styles.insert(
         egui::TextStyle::Button,
-        egui::FontId::new(14.0, egui::FontFamily::Monospace),
+        egui::FontId::new(14.5, egui::FontFamily::Proportional),
     );
     style.text_styles.insert(
         egui::TextStyle::Monospace,
@@ -896,55 +1467,56 @@ fn build_style(theme: &ResolvedTheme) -> egui::Style {
     visuals.window_fill = theme.window_fill;
     visuals.panel_fill = theme.panel_fill;
     visuals.faint_bg_color = theme.panel_fill_soft;
-    visuals.extreme_bg_color = darken(theme.panel_fill_raised, 0.08);
-    visuals.code_bg_color = darken(theme.panel_fill_soft, 0.08);
+    visuals.extreme_bg_color = darken(theme.panel_fill_raised, 0.04);
+    visuals.code_bg_color = darken(theme.panel_fill_soft, 0.03);
     visuals.hyperlink_color = theme.accent_color;
     visuals.selection.bg_fill = theme.accent_hover_color;
-    visuals.selection.stroke.color = egui::Color32::BLACK;
+    visuals.selection.stroke.color = theme.text_color;
     visuals.override_text_color = Some(theme.text_color);
-    visuals.window_stroke.color = theme.border_color;
-    visuals.window_stroke.width = 1.2;
+    visuals.window_stroke.color = theme.border_color.gamma_multiply(0.06);
+    visuals.window_stroke.width = 0.6;
     visuals.widgets.noninteractive.fg_stroke.color = theme.text_color;
-    visuals.widgets.noninteractive.bg_fill = theme.panel_fill_raised;
-    visuals.widgets.noninteractive.bg_stroke.color = theme.border_color;
-    visuals.widgets.inactive.bg_fill = theme.panel_fill_soft;
-    visuals.widgets.inactive.bg_stroke.color = theme.border_color;
+    visuals.widgets.noninteractive.bg_fill = theme.panel_fill;
+    visuals.widgets.noninteractive.bg_stroke.color = theme.panel_fill;
+    visuals.widgets.inactive.bg_fill = theme.panel_fill;
+    visuals.widgets.inactive.bg_stroke.color = theme.panel_fill;
     visuals.widgets.inactive.fg_stroke.color = theme.text_color;
-    visuals.widgets.hovered.bg_fill = theme.accent_hover_color;
-    visuals.widgets.hovered.bg_stroke.color = theme.border_color;
-    visuals.widgets.hovered.fg_stroke.color = theme.accent_text_color;
-    visuals.widgets.active.bg_fill = theme.accent_color;
-    visuals.widgets.active.bg_stroke.color = theme.border_color;
-    visuals.widgets.active.fg_stroke.color = theme.accent_text_color;
-    visuals.widgets.open = visuals.widgets.active;
+    visuals.widgets.hovered.bg_fill = lighten(theme.panel_fill, 0.03);
+    visuals.widgets.hovered.bg_stroke.color = lighten(theme.panel_fill, 0.03);
+    visuals.widgets.hovered.fg_stroke.color = theme.text_color;
+    visuals.widgets.active.bg_fill = lighten(theme.panel_fill, 0.04);
+    visuals.widgets.active.bg_stroke.color = lighten(theme.panel_fill, 0.04);
+    visuals.widgets.active.fg_stroke.color = theme.text_color;
+    visuals.widgets.open = visuals.widgets.inactive;
 
     style.visuals = visuals;
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.window_margin = egui::Margin::same(12.0);
-    style.spacing.indent = 12.0;
-    style.visuals.window_rounding = egui::Rounding::same(10.0);
-    style.visuals.menu_rounding = egui::Rounding::same(8.0);
-    style.visuals.widgets.inactive.rounding = egui::Rounding::same(7.0);
-    style.visuals.widgets.hovered.rounding = egui::Rounding::same(7.0);
-    style.visuals.widgets.active.rounding = egui::Rounding::same(7.0);
-    style.visuals.widgets.noninteractive.bg_fill = darken(style.visuals.panel_fill, 0.03);
-    style.visuals.widgets.noninteractive.bg_stroke.width = 1.0;
-    style.visuals.widgets.inactive.bg_fill = lighten(style.visuals.panel_fill, 0.03);
-    style.visuals.widgets.inactive.bg_stroke.width = 0.9;
-    style.visuals.widgets.hovered.bg_stroke.width = 1.1;
-    style.visuals.widgets.active.bg_stroke.width = 1.1;
+    style.spacing.indent = 10.0;
+    style.visuals.window_rounding = egui::Rounding::same(16.0);
+    style.visuals.menu_rounding = egui::Rounding::same(10.0);
+    style.visuals.widgets.inactive.rounding = egui::Rounding::same(10.0);
+    style.visuals.widgets.hovered.rounding = egui::Rounding::same(10.0);
+    style.visuals.widgets.active.rounding = egui::Rounding::same(10.0);
+    style.visuals.widgets.noninteractive.rounding = egui::Rounding::same(10.0);
+    style.visuals.widgets.noninteractive.bg_fill = darken(style.visuals.panel_fill, 0.01);
+    style.visuals.widgets.noninteractive.bg_stroke.width = 0.0;
+    style.visuals.widgets.inactive.bg_fill = style.visuals.panel_fill;
+    style.visuals.widgets.inactive.bg_stroke.width = 0.0;
+    style.visuals.widgets.hovered.bg_stroke.width = 0.0;
+    style.visuals.widgets.active.bg_stroke.width = 0.0;
     style.visuals.window_shadow = egui::epaint::Shadow {
         offset: egui::vec2(0.0, 10.0),
-        blur: 22.0,
+        blur: 24.0,
         spread: 0.0,
-        color: egui::Color32::from_black_alpha(96),
+        color: egui::Color32::from_black_alpha(36),
     };
     style.visuals.popup_shadow = egui::epaint::Shadow {
-        offset: egui::vec2(0.0, 8.0),
-        blur: 18.0,
+        offset: egui::vec2(0.0, 6.0),
+        blur: 14.0,
         spread: 0.0,
-        color: egui::Color32::from_black_alpha(86),
+        color: egui::Color32::from_black_alpha(24),
     };
     style
 }

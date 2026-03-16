@@ -2,44 +2,56 @@
 
 ## Milestone 0.1 - Working Core
 
-- [x] UI desktop minimale in Rust/egui
-- [x] Backend multipli: Ollama, ChatGPT, Gemini
-- [x] Hotkey globale e apertura popup
-- [x] Configurazione YAML
-- [x] Visualizzazione risposta nel popup
-- [x] Modalita `--ui` per ambienti con limiti Wayland
-- [x] Lettura automatica del testo selezionato
-- [x] Shortcut di apply/copy della risposta
-- [x] Sistema di theming configurabile
+- [x] Minimal desktop UI in Rust/egui
+- [x] Multiple backends: Ollama, ChatGPT, Gemini, Claude
+- [x] YAML configuration
+- [x] Response rendering in the popup
+- [x] Automatic selected-text capture
+- [x] Configurable theming system
 
 ## Milestone 0.2 - Workflow Reliability
 
-- [ ] Verifica preventiva delle dipendenze OS per auto-apply
-- [ ] Messaggi di stato piu chiari su apply, copy e fallback
-- [ ] Setup guidato per Wayland / X11
-- [ ] Script di bootstrap per installare o verificare le utility richieste
-- [ ] Test manuali documentati per i flussi principali
+- [ ] Early diagnostics for runtime environment and configured backends
+- [ ] Clearer status messages for backend state, config persistence, and failure recovery
+- [ ] Guided first-run setup and central directory verification
+- [ ] Documented manual test flows for core user journeys
 
 ## Milestone 0.3 - UX and Identity
 
-- [x] Prima revisione visuale del tema `NERV HUD` con card, ombre leggere e bottoni piu leggibili
-- [x] History persistente consultabile dal popup con filtri e azioni rapide
-- [x] Temi esternalizzati in file dedicati e selezionabili da configurazione
-- [ ] Refinement visuale finale del tema `NERV HUD`
-- [ ] Preset aggiuntivi e override piu completi
-- [ ] Streaming della risposta
-- [ ] Componenti UI piu espressivi per stato, backend e azioni rapide
+- [x] First visual pass on the `NERV HUD` theme with cards, lighter depth, and clearer buttons
+- [x] Persistent history accessible from the popup with filters and quick actions
+- [x] Themes externalized into dedicated files and selectable from configuration
+- [x] Settings panel with real-time theme and language switching
+- [x] UI localization through external files
+- [x] History multi-select and deletion
+- [x] Coherent dropdown styling across popup, settings, and history
+- [x] Local desktop icon and launcher integration for user installs
+- [ ] Final refinement pass on the `NERV HUD` theme
+- [ ] Additional presets and more complete overrides
+- [ ] Response streaming
+- [ ] More expressive UI components for state, backend visibility, and quick actions
 
 ## Milestone 0.4 - Productivity Features
 
-- [ ] Cronologia di sessione distinta dalla history persistente
-- [ ] Template prompt/snippet
-- [ ] Memoria conversazionale opzionale
-- [ ] Contesto finestra attiva come hint
+- [ ] Session-only history distinct from persistent history
+- [ ] Prompt/snippet templates
+- [ ] Optional conversational memory
+- [ ] Active-window context as a hint
+- [ ] Multiple config profiles such as `work`, `personal`, and `beta`
+
+## Milestone 0.5 - Beta Integrations
+
+- [ ] Beta terminal mode with proposed command plus explicit user confirmation
+- [ ] Beta MCP client integration for tools and external context
+- [ ] Beta tools panel covering `terminal`, `CLI`, `MCP`, and AI backend status
+- [ ] Beta tool and command output with logs and execution state
+- [ ] Beta sandbox UX with explicit confirmation before sensitive actions
 
 ## Milestone 1.0 - Distribution
 
-- [ ] Installazione semplificata per Linux/macOS/Windows
-- [ ] Packaging di release
-- [ ] Editor grafico della configurazione
-- [ ] Stabilizzazione cross-platform
+- [x] Simplified local installation for Linux, macOS, and Windows
+- [x] Release packaging
+- [x] Graphical configuration editor
+- [x] Bundled desktop assets included in local install and release packaging
+- [ ] Cross-platform stabilization
+- [ ] Release notes and distribution changelog

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="armando icon">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2A1F40" />
+      <stop offset="100%" stop-color="#4A3770" />
+    </linearGradient>
+    <linearGradient id="mark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5EE8BA" />
+      <stop offset="100%" stop-color="#A5F0D8" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)" />
+  <path
+    d="M32 10 50 28 32 46 14 28Z"
+    fill="url(#mark)"
+  />
+  <rect x="20" y="27" width="24" height="8" rx="4" fill="#1C162B" />
+  <rect x="28" y="35" width="8" height="15" rx="4" fill="#1C162B" />
+</svg>

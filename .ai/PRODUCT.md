@@ -2,44 +2,47 @@
 
 ## Summary
 
-`test-popup-ai` e un assistente AI desktop leggero che compare con una scorciatoia globale e permette di interrogare un backend AI senza interrompere il flusso di lavoro.
+`test-popup-ai` is a lightweight desktop AI assistant that opens from the operating system and lets the user query an AI backend without breaking their working flow.
+It is optimized for quick text work, low-friction settings changes, and desktop-native behavior instead of browser-style session management.
 
 ## Product Goal
 
-Ridurre al minimo il contesto operativo necessario per usare un modello AI durante attivita quotidiane come scrittura, riscrittura, traduzione, debugging e quick assistance.
-Il focus primario del prodotto e aiutare a ripulire, ottimizzare, tradurre e adattare testo gia scritto o da rifinire, in modo che sia subito riutilizzabile.
+Minimize the operational overhead required to use an AI model during everyday tasks such as writing, rewriting, translation, debugging, and quick assistance.
+The main product focus is helping users clean up, optimize, translate, and adapt text so the result can be reused immediately.
 
 ## Core Value Proposition
 
-- Accesso immediato all'AI senza browser o cambio finestra
-- Supporto a backend cloud e locali
-- Configurazione semplice via file YAML
-- Integrazione pratica con il flusso desktop
+- Immediate AI access without opening a browser or changing windows
+- Support for both cloud and local backends
+- Simple configuration through YAML files and the built-in settings panel
+- Practical integration with desktop-first workflows
+- Visual consistency that keeps the popup readable and dependable during repeated daily use
 
 ## Primary Use Cases
 
-- Riformulare testo selezionato
-- Tradurre rapidamente contenuti
-- Generare risposta da reinserire nell'applicazione attiva
-- Usare alias di prompt per task ripetitivi
-- Consultare un backend locale senza uscire dall'ambiente di lavoro
+- Rewrite selected text
+- Translate content quickly
+- Generate a response to paste back into the active application
+- Use prompt aliases for repetitive tasks
+- Query a local backend without leaving the working environment
 
 ## Non-Goals
 
-- Non sostituisce un client chat completo con cronologia avanzata
-- Non e un editor ricco o un IDE assistant full-context
-- Non punta a un sistema plugin complesso in questa fase iniziale
+- It is not a full chat client with advanced conversation management
+- It is not a rich editor or a full-context IDE assistant
+- It does not aim for a complex plugin system at this early stage
+- It does not execute external commands or tools automatically without explicit confirmation UX
 
 ## UX Principles
 
-- Apertura istantanea
-- Interazione essenziale
-- Chiarezza nello stato di caricamento
-- Feedback esplicito quando l'auto-apply non e disponibile
-- Identita visiva configurabile ma coerente
+- Instant launch
+- Minimal interaction overhead
+- Clear loading and processing states
+- Clear separation between configuration, generated content, and history
+- Configurable but cohesive visual identity
+- Desktop integration should feel native enough to launch from shortcuts, menus, and taskbars without extra manual setup
 
 ## Constraints
 
-- Wayland limita alcune forme di automazione/input injection
-- L'auto-apply dipende da utility di sistema esterne
-- Il popup deve restare leggero, prevedibile e trasportabile
+- The popup must remain lightweight, predictable, and portable
+- Future tool-based integrations require sandboxing and explicit user consent

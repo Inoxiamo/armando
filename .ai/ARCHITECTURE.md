@@ -2,60 +2,84 @@
 
 ## Stack
 
-- Linguaggio: Rust
-- UI desktop: `eframe` / `egui`
+- Language: Rust
+- Desktop UI: `eframe` / `egui`
 - Async runtime: `tokio`
 - HTTP client: `reqwest`
-- Configurazione: `serde_yaml`
+- Configuration: `serde_yaml`
 - Clipboard: `arboard`
-- Hotkey globali: `global-hotkey`
 
 ## Main Components
 
 - `src/main.rs`
-  Avvio applicazione. Sceglie tra modalita daemon e modalita UI.
-
-- `src/daemon.rs`
-  Registra l'hotkey globale e apre la UI su trigger.
+  Application entry point. Loads config and theme, configures the native viewport, and opens the popup UI directly.
 
 - `src/gui.rs`
-  Gestisce stato della finestra, invio prompt, rendering risposta, pannello history, shortcut locali, tema e auto-apply.
+  Owns the main interaction flow: prompt entry, backend selection, response rendering, settings, history, localization, and theme-aware widget styling.
 
 - `src/config.rs`
-  Definisce il formato della configurazione YAML e il lookup dei path di caricamento.
+  Defines the YAML configuration schema, persistence behavior, and config path resolution.
 
 - `src/history.rs`
-  Gestisce persistenza locale della history, retention a 7 giorni e lookup del file `history.jsonl`.
+  Manages local history persistence, 7-day retention, selective deletion, and `history.jsonl` lookup.
 
 - `src/theme.rs`
-  Carica temi esterni da file YAML e risolve la palette colore usata dalla UI.
+  Loads external theme files, discovers available presets, and resolves the color palette used by the UI.
+
+- `src/i18n.rs`
+  Loads external locale files, falls back to English, and discovers available UI languages.
+
+- `src/app_paths.rs`
+  Centralizes application paths for config, themes, locales, and history.
 
 - `src/backends/*`
-  Implementazioni dei backend AI supportati: Ollama, ChatGPT/OpenAI, Gemini.
+  Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude.
+
+- `scripts/install-local.sh`
+  Builds the release binary and installs the user-local binary, config, themes, locales, icon, and desktop entry.
+
+- `scripts/package-release.sh`
+  Produces distributable archives that bundle the binary together with shipped config, theme, locale, and asset files.
+
+- `assets/`
+  Holds desktop-facing assets, currently the project icon and the Linux desktop entry.
 
 ## Runtime Flow
 
-1. Il processo principale carica `config.yaml`
-2. In modalita daemon registra l'hotkey globale
-3. Alla pressione dell'hotkey apre una nuova UI (`--ui`)
-4. La UI opzionalmente legge il testo selezionato
-5. L'utente invia il prompt
-6. Una task async interroga il backend selezionato
-7. In caso di successo la risposta viene salvata nella history locale
-8. La risposta viene mostrata nel popup
-9. Con `Ctrl+Enter` la risposta viene applicata oppure copiata negli appunti con feedback esplicito
+1. The main process loads the application config
+2. The selected external theme is resolved
+3. The selected UI locale is loaded
+4. The desktop popup UI opens directly
+5. The UI may preload selected text from the OS
+6. The user submits a prompt
+7. An async task queries the selected backend
+8. Successful responses are appended to local history
+9. The response is rendered in the popup
+10. The user can change theme, language, backend, models, and credentials from the settings panel with immediate persistence
+11. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+
+## UI Structure
+
+- Main popup area:
+  backend selector, settings access, generic mode toggle, prompt editor, primary actions, and response area
+- Settings side panel:
+  language/theme/backend selectors, model and key sections, and persistence feedback
+- History panel:
+  backend filter, text filter, batch actions, and reusable history cards
+
+The UI styling is theme-driven, but high-friction controls such as dropdowns, buttons, cards, and text areas are normalized in code so they remain visually coherent across themes.
 
 ## Theming
 
-Il tema e selezionato via configurazione YAML, ma la palette vera e propria vive in file esterni sotto `themes/` oppure in un path custom specificato in config.
-L'approccio resta coerente con `egui`, che espone uno style system nativo.
+The active theme is selected through configuration or the settings panel, while the actual palette lives in external YAML files under `themes/` or an explicit custom path.
+This keeps the approach aligned with `egui` while allowing shipped presets and user overrides.
 
-Campi attuali:
+Theme selector fields:
 
 - `name`
 - `path`
 
-Campi principali del file tema:
+Main theme file fields:
 
 - `window_fill`
 - `panel_fill`
@@ -69,19 +93,18 @@ Campi principali del file tema:
 - `border_color`
 - `danger_color`
 
-Preset attuali:
+Current presets:
 
 - `default-dark`
 - `nerv-hud`
 - `nerv-magi-system`
 - `magi`
 
-La UI usa card con bordo, profondita leggera e aree scroll dedicate per separare risposta e history senza conflitti di input.
-Quando la history viene aperta, la finestra aggiorna `MinInnerSize` e `InnerSize` tramite viewport command nativi per espandersi verso il basso.
+The UI uses lightweight cards, dedicated scroll areas, and a scrollable side settings panel.
+When history is opened, the window updates `MinInnerSize` and `InnerSize` through native viewport commands so the layout expands downward instead of hiding the panel.
 
 ## Platform Notes
 
-- Wayland: per auto-apply affidabile servono `wl-copy` e `wtype`
-- X11: per auto-apply affidabile servono `xclip` e `xdotool`
-- In assenza dell'iniezione tastiera, il sistema effettua almeno la copia negli appunti
-- La history locale viene salvata nella directory dati utente dell'applicazione e non nel repository
+- Local history is stored in the user data directory, not in the repository
+- Themes and locales are resolved both from the repository and from central user directories
+- On Linux/Wayland, the viewport `app_id` should match the installed `.desktop` entry so launchers and taskbars can resolve the correct application identity and icon
