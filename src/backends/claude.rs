@@ -67,10 +67,7 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
             .unwrap_or(text.trim());
 
         return Err(anyhow!(
-            "Claude API error (HTTP {}): modello `{}`. {}",
-            status,
-            model,
-            message
+            "Claude API error (HTTP {status}): modello `{model}`. {message}"
         ));
     }
 

@@ -13,7 +13,7 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
         ("http://localhost:11434".to_string(), "llama3".to_string())
     };
 
-    let url = format!("{}/api/generate", base_url);
+    let url = format!("{base_url}/api/generate");
     let payload = json!({
         "model": model,
         "prompt": prompt,
@@ -35,7 +35,9 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
         .await
         .map_err(|e| {
             if e.is_connect() {
-                anyhow!("⚠️ Cannot connect to Ollama at {}.\nMake sure Ollama is running: ollama serve\n(Error: {})", base_url, e)
+                anyhow!(
+                    "⚠️ Cannot connect to Ollama at {base_url}.\nMake sure Ollama is running: ollama serve\n(Error: {e})"
+                )
             } else {
                 e.into()
             }

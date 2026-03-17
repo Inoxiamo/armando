@@ -65,17 +65,12 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
                 || message.to_lowercase().contains("rate limit"))
         {
             return Err(anyhow!(
-                "Quota OpenAI esaurita o billing non attivo. Il modello configurato e `{}`. Verifica piano, crediti e fatturazione del progetto API, poi riprova. Dettaglio API: {}",
-                model,
-                message
+                "Quota OpenAI esaurita o billing non attivo. Il modello configurato e `{model}`. Verifica piano, crediti e fatturazione del progetto API, poi riprova. Dettaglio API: {message}"
             ));
         }
 
         return Err(anyhow!(
-            "ChatGPT API error (HTTP {}): modello `{}`. {}",
-            status,
-            model,
-            message
+            "ChatGPT API error (HTTP {status}): modello `{model}`. {message}"
         ));
     }
 
@@ -129,9 +124,7 @@ pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
         return Err(anyhow!(
-            "OpenAI transcription error (HTTP {}): {}",
-            status,
-            text
+            "OpenAI transcription error (HTTP {status}): {text}"
         ));
     }
 

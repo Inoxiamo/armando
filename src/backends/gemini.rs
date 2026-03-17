@@ -19,8 +19,7 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
     }
 
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model, api_key
+        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     );
 
     let mut parts = vec![json!({ "text": prompt })];
@@ -44,7 +43,7 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
 
     if !response.status().is_success() {
         let text = response.text().await.unwrap_or_default();
-        return Err(anyhow!("Gemini API error: {}", text));
+        return Err(anyhow!("Gemini API error: {text}"));
     }
 
     let result: serde_json::Value = response.json().await?;

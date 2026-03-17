@@ -126,7 +126,7 @@ fn health_check_openai(config: &Config) -> HealthCheck {
                 ok(
                     "chatgpt",
                     "Ready",
-                    format!("Configured with model `{}`.", chatgpt.model),
+                    format!("Configured with model `{model}`.", model = chatgpt.model),
                 )
             }
         }
@@ -158,7 +158,7 @@ fn health_check_claude(config: &Config) -> HealthCheck {
                 ok(
                     "claude",
                     "Ready",
-                    format!("Configured with model `{}`.", claude.model),
+                    format!("Configured with model `{model}`.", model = claude.model),
                 )
             }
         }
@@ -188,7 +188,7 @@ fn health_check_gemini(config: &Config) -> HealthCheck {
                 ok(
                     "gemini",
                     "Ready",
-                    format!("Configured with model `{}`.", gemini.model),
+                    format!("Configured with model `{model}`.", model = gemini.model),
                 )
             }
         }
@@ -539,10 +539,9 @@ fn prepare_prompt(
     };
 
     format!(
-        "{}{}\n\nRichiesta utente:\n{}",
+        "{}{}\n\nRichiesta utente:\n{effective_prompt}",
         instructions.join("\n"),
         conversation_block,
-        effective_prompt
     )
 }
 
@@ -597,7 +596,7 @@ fn expand_tags(prompt: &str, aliases: Option<&HashMap<String, String>>) -> (Stri
     }
 
     (
-        format!("{}\n\n{}", instructions.join("\n"), body),
+        format!("{}\n\n{body}", instructions.join("\n")),
         applied_tags,
     )
 }
