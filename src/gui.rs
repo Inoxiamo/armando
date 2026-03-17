@@ -316,7 +316,7 @@ impl AiPopupApp {
                     }
                 }
                 Err(e) => {
-                    self.response = format!("Error: {}", e);
+                    self.response = format!("Error: {e}");
                     self.pending_submission = None;
                     self.auto_copy_close_after_response = false;
                 }
@@ -2416,7 +2416,7 @@ fn provider_credit_note(app: &AiPopupApp, provider: &str) -> String {
 
 fn load_image_attachment_from_path(path: &Path) -> Result<ImageAttachment, String> {
     let bytes = std::fs::read(path)
-        .map_err(|err| format!("Could not read image file `{}`: {}", path.display(), err))?;
+        .map_err(|err| format!("Could not read image file `{}`: {err}", path.display()))?;
     let mime_type = infer_image_mime(path)
         .ok_or_else(|| "Unsupported image format. Use PNG, JPG, JPEG, WEBP, or GIF.".to_string())?;
 
@@ -2432,7 +2432,7 @@ fn load_image_attachment_from_path(path: &Path) -> Result<ImageAttachment, Strin
 
 fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
     let mut clipboard =
-        arboard::Clipboard::new().map_err(|err| format!("Clipboard not available: {}", err))?;
+        arboard::Clipboard::new().map_err(|err| format!("Clipboard not available: {err}"))?;
     if let Ok(image) = clipboard.get_image() {
         let mut png_bytes = Vec::new();
         PngEncoder::new(&mut png_bytes)
@@ -2442,7 +2442,7 @@ fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
                 image.height as u32,
                 image::ExtendedColorType::Rgba8,
             )
-            .map_err(|err| format!("Could not encode clipboard image: {}", err))?;
+            .map_err(|err| format!("Could not encode clipboard image: {err}"))?;
 
         return Ok(image_attachment_from_bytes(
             "clipboard-screenshot.png".to_string(),
@@ -2642,7 +2642,7 @@ fn begin_voice_recording() -> Result<VoiceRecording, String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|err| format!("Could not start microphone recording: {}", err))?;
+        .map_err(|err| format!("Could not start microphone recording: {err}"))?;
 
     Ok(VoiceRecording { child, path })
 }
@@ -2657,7 +2657,7 @@ fn finish_voice_recording(mut recording: VoiceRecording) -> Result<Vec<u8>, Stri
     let _ = recording.child.wait();
 
     let bytes = std::fs::read(&recording.path)
-        .map_err(|err| format!("Could not read recorded dictation audio: {}", err))?;
+        .map_err(|err| format!("Could not read recorded dictation audio: {err}"))?;
     let _ = std::fs::remove_file(&recording.path);
     if bytes.is_empty() {
         return Err(String::new());
@@ -2668,7 +2668,7 @@ fn finish_voice_recording(mut recording: VoiceRecording) -> Result<Vec<u8>, Stri
 fn command_exists(name: &str) -> bool {
     Command::new("sh")
         .arg("-c")
-        .arg(format!("command -v {} >/dev/null 2>&1", name))
+        .arg(format!("command -v {name} >/dev/null 2>&1"))
         .status()
         .map(|status| status.success())
         .unwrap_or(false)

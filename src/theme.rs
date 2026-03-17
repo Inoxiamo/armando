@@ -64,7 +64,7 @@ pub fn load_theme_by_name(name: &str, loaded_from: Option<&Path>) -> anyhow::Res
         }
     }
 
-    anyhow::bail!("Theme '{}' not found.", name)
+    anyhow::bail!("Theme '{name}' not found.")
 }
 
 pub fn available_theme_names() -> anyhow::Result<Vec<String>> {
@@ -112,7 +112,7 @@ impl ThemeDefinition {
 fn parse_hex_color(value: &str) -> anyhow::Result<egui::Color32> {
     let value = value.trim().trim_start_matches('#');
     if value.len() != 6 {
-        anyhow::bail!("Invalid theme color '{}': expected 6 hex characters", value);
+        anyhow::bail!("Invalid theme color '{value}': expected 6 hex characters");
     }
 
     let r = u8::from_str_radix(&value[0..2], 16)?;

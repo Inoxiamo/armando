@@ -67,5 +67,5 @@ fn load_locale_file(code: &str) -> anyhow::Result<LocaleDefinition> {
         }
     }
 
-    anyhow::bail!("Locale '{}' not found.", code)
+    anyhow::bail!("Locale '{code}' not found.")
 }

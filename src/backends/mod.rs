@@ -65,7 +65,7 @@ pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: Pro
         "claude" => claude::query(&prepared_prompt, &input.images, config).await,
         "gemini" => gemini::query(&prepared_prompt, &input.images, config).await,
         "ollama" => ollama::query(&prepared_prompt, &input.images, config).await,
-        _ => return format!("❌ Unknown backend: {}", backend),
+        _ => return format!("❌ Unknown backend: {backend}"),
     };
 
     match res {
@@ -81,7 +81,7 @@ pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: Pro
         Err(e) => {
             log::error!("{} error: {:?}", backend, e);
             logging::log_error(config, backend, input, &e.to_string());
-            format!("❌ {} error: {}", backend, e)
+            format!("❌ {backend} error: {e}")
         }
     }
 }
