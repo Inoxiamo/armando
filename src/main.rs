@@ -36,7 +36,7 @@ fn run_ui(cfg: config::Config) -> anyhow::Result<()> {
         options,
         Box::new(move |cc| Box::new(gui::AiPopupApp::new(cc, cfg, theme, rt))),
     )
-    .map_err(|e| anyhow::anyhow!("eframe error: {:?}", e))
+    .map_err(|e| anyhow::anyhow!("eframe error: {e:?}"))
 }
 
 fn build_app_icon() -> egui::IconData {
