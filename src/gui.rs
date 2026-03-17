@@ -2608,7 +2608,7 @@ fn format_size(bytes: usize) -> String {
     } else if bytes as f32 >= KB {
         format!("{:.0} KB", bytes as f32 / KB)
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }
 

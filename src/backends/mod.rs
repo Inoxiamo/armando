@@ -79,7 +79,7 @@ pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: Pro
             text
         }
         Err(e) => {
-            log::error!("{} error: {:?}", backend, e);
+            log::error!("{backend} error: {e:?}");
             logging::log_error(config, backend, input, &e.to_string());
             format!("❌ {backend} error: {e}")
         }
@@ -534,8 +534,7 @@ fn prepare_prompt(
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
         format!(
-            "\n\nContesto conversazione corrente:\nUsa questi turni precedenti solo come contesto della conversazione in corso. Non reinterpretare automaticamente la nuova richiesta come compito di pulizia o trasformazione del testo, a meno che l'utente lo chieda esplicitamente.\n\n{}",
-            turns
+            "\n\nContesto conversazione corrente:\nUsa questi turni precedenti solo come contesto della conversazione in corso. Non reinterpretare automaticamente la nuova richiesta come compito di pulizia o trasformazione del testo, a meno che l'utente lo chieda esplicitamente.\n\n{turns}"
         )
     };
 
