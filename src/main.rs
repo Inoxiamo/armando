@@ -20,8 +20,8 @@ fn run_ui(cfg: config::Config) -> anyhow::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([760.0, 560.0])
-            .with_min_inner_size([620.0, 420.0])
+            .with_inner_size([920.0, 720.0])
+            .with_min_inner_size([760.0, 560.0])
             .with_app_id("armando")
             .with_always_on_top()
             .with_resizable(true)

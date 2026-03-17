@@ -254,8 +254,8 @@ impl AiPopupApp {
             dictation_status: None,
             voice_recording: None,
             prompt_focus_initialized: false,
-            prompt_editor_height: 280.0,
-            response_editor_height: 230.0,
+            prompt_editor_height: 220.0,
+            response_editor_height: 200.0,
             generic_question_mode: false,
             session_chat_enabled: false,
             session_conversation: Vec::new(),
@@ -843,7 +843,7 @@ impl eframe::App for AiPopupApp {
         if self.show_settings {
             egui::SidePanel::right("settings_panel")
                 .resizable(false)
-                .default_width(320.0)
+                .default_width(380.0)
                 .frame(card_frame(
                     ctx,
                     self.theme.panel_fill_raised,
@@ -2763,17 +2763,24 @@ fn history_entry_card(
 }
 
 fn sync_main_viewport(ctx: &egui::Context, show_history: bool, show_settings: bool) {
-    const BASE_MIN_WIDTH: f32 = 620.0;
-    const BASE_MIN_HEIGHT: f32 = 420.0;
-    const SETTINGS_MIN_WIDTH: f32 = 980.0;
-    const HISTORY_MIN_HEIGHT: f32 = 620.0;
+    const BASE_MIN_WIDTH: f32 = 760.0;
+    const BASE_MIN_HEIGHT: f32 = 560.0;
+    const SETTINGS_MIN_WIDTH: f32 = 1180.0;
+    const SETTINGS_MIN_HEIGHT: f32 = 720.0;
+    const HISTORY_MIN_HEIGHT: f32 = 700.0;
 
     let min_width = if show_settings {
         SETTINGS_MIN_WIDTH
     } else {
         BASE_MIN_WIDTH
     };
-    let min_height = if show_history {
+    let min_height = if show_settings {
+        SETTINGS_MIN_HEIGHT.max(if show_history {
+            HISTORY_MIN_HEIGHT
+        } else {
+            BASE_MIN_HEIGHT
+        })
+    } else if show_history {
         HISTORY_MIN_HEIGHT
     } else {
         BASE_MIN_HEIGHT

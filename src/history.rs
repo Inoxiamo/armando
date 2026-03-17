@@ -57,8 +57,12 @@ fn load_entries() -> anyhow::Result<Vec<HistoryEntry>> {
         return Ok(Vec::new());
     }
 
-    let file = fs::File::open(&path)
-        .with_context(|| format!("Failed to open history file at {path_display}", path_display = path.display()))?;
+    let file = fs::File::open(&path).with_context(|| {
+        format!(
+            "Failed to open history file at {path_display}",
+            path_display = path.display()
+        )
+    })?;
     let reader = BufReader::new(file);
     let mut entries = Vec::new();
 
@@ -87,7 +91,12 @@ fn write_entries(entries: &[HistoryEntry]) -> anyhow::Result<()> {
         .write(true)
         .truncate(true)
         .open(&path)
-        .with_context(|| format!("Failed to write history file at {path_display}", path_display = path.display()))?;
+        .with_context(|| {
+            format!(
+                "Failed to write history file at {path_display}",
+                path_display = path.display()
+            )
+        })?;
 
     for entry in entries {
         writeln!(file, "{}", serde_json::to_string(entry)?)?;
