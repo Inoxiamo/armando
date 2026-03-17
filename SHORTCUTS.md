@@ -6,7 +6,7 @@ This page explains the practical way to launch `armando` with a keyboard combina
 
 `armando` can be launched with a keyboard shortcut on all major desktop operating systems, but the shortcut is still registered by the OS, not by the app itself.
 
-The portable setup is:
+The practical setup is:
 
 1. install `armando`
 2. locate the installed executable
@@ -15,19 +15,27 @@ The portable setup is:
 
 Installed executable paths:
 
-- Linux: `~/.local/bin/armando`
-- macOS: `~/.local/bin/armando`
-- Windows: `%LOCALAPPDATA%\armando\bin\armando.exe`
+- Linux: `/home/<your-user>/.local/bin/armando`
+- macOS: `/Users/<your-user>/.local/bin/armando`
+- Windows: `C:\Users\<your-user>\AppData\Local\armando\bin\armando.exe`
 
 ## Linux
 
 Most desktop environments support a direct custom command shortcut.
 
-Command to launch:
+Command to launch the installed binary (not the extracted bundle):
 
 ```bash
-~/.local/bin/armando
+/home/<your-user>/.local/bin/armando
 ```
+
+If you want to confirm the exact installed path for your user:
+
+```bash
+printf '%s\n' "$HOME/.local/bin/armando"
+```
+
+If you installed under a different home directory or set custom XDG directories, point the shortcut at the resulting installed binary instead of the default path above.
 
 Common places to configure it:
 
@@ -35,20 +43,27 @@ Common places to configure it:
 - KDE Plasma: `System Settings` -> `Shortcuts` -> `Custom Shortcuts`
 - Xfce: `Settings` -> `Keyboard` -> `Application Shortcuts`
 
+Recommended Linux setup:
+
+1. Create a custom command shortcut.
+2. Use the full path `/home/<your-user>/.local/bin/armando` or the exact result of `echo "$HOME/.local/bin/armando"`.
+3. Assign the key combination you want.
+4. Test the shortcut while `armando` is not already focused.
+
 ## macOS
 
-macOS usually needs a small wrapper step because it does not expose a simple universal UI to bind an arbitrary binary path directly as a global shortcut.
+macOS usually needs a wrapper step because it does not expose one universal UI to bind an arbitrary binary path directly as a global shortcut.
 
 Practical options:
 
 1. `Shortcuts` app
-   Create a shortcut that runs a shell script calling `~/.local/bin/armando`, then assign a keyboard shortcut in the Shortcuts settings.
+Create a shortcut that runs a shell script calling `/Users/<your-user>/.local/bin/armando`, then assign a keyboard shortcut in the Shortcuts settings.
 
 2. `Automator`
-   Create a Quick Action or Application that runs:
+Create a Quick Action or Application that runs:
 
 ```bash
-~/.local/bin/armando
+/Users/<your-user>/.local/bin/armando
 ```
 
 Then bind the shortcut in `System Settings` -> `Keyboard` -> `Keyboard Shortcuts` -> `Services`.
@@ -58,19 +73,19 @@ Then bind the shortcut in `System Settings` -> `Keyboard` -> `Keyboard Shortcuts
 Windows gives you two simple options.
 
 1. Desktop shortcut
-   Create a shortcut to `%LOCALAPPDATA%\armando\bin\armando.exe`, open its properties, and set a `Shortcut key`.
+Create a shortcut to `C:\Users\<your-user>\AppData\Local\armando\bin\armando.exe`, open its properties, and set a `Shortcut key`.
 
 2. PowerToys Keyboard Manager
-   Use PowerToys to bind a keyboard combination that launches `%LOCALAPPDATA%\armando\bin\armando.exe`.
+Use PowerToys to bind a keyboard combination that launches `C:\Users\<your-user>\AppData\Local\armando\bin\armando.exe`.
 
 ## Can One Keyboard Combo Work Identically Everywhere?
 
 Not from documentation or installer setup alone.
 
-Linux is easy because desktop environments natively support command shortcuts.
+Linux is straightforward because desktop environments natively support command shortcuts.
 macOS and Windows can do the same job, but they need OS-specific registration steps.
 
-If you want one built-in global hotkey feature managed directly by `armando`, it has to be implemented with native platform APIs inside the application.
+If you want one built-in global hotkey managed directly by `armando`, it has to be implemented with native platform APIs inside the application.
 
 ## Next Steps
 

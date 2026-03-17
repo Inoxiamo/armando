@@ -59,6 +59,7 @@
 - Opening the settings panel now expands the viewport width when needed so the main prompt/response preview does not get squeezed into a broken narrow layout
 - Prompt actions are grouped directly in the prompt header, while copy/history controls are grouped in the response header for a shorter interaction path
 - Toolbar actions now use embedded SVG icons for the main controls so they stay visible and more polished without relying on emoji or font fallback
+- Toolbar SVG icons are now rasterized against the current `pixels_per_point` scale and refreshed when the viewport scale changes so they stay crisp on HiDPI displays
 - Pasting into the prompt with `Ctrl+V` or `Cmd+V` now also auto-attaches an image when the clipboard contains one, while normal text paste continues to work as usual
 - Clipboard image paste now also falls back to local image paths or `file://` image URIs copied from other apps when direct bitmap clipboard data is unavailable
 - History reloads when enabled, when the panel is opened, and after every successful response
@@ -67,6 +68,7 @@
 - History expansion is capped to the usable monitor space to avoid excessive stretching
 - Primary actions use explicit labels to avoid ambiguous buttons
 - Text on accent buttons is configurable through `accent_text_color` in the theme file
+- The large `src/gui.rs` update loop is now split into focused rendering helpers for the main panel, top controls, prompt/response sections, settings, and provider subsections to keep future UI work safer
 - Local installation places the binary, shipped themes, shipped locales, desktop icon, and `.desktop` launcher entry in the user profile
 - Downloaded GitHub release bundles now include bundled assets, install scripts, and checksums so other users can extract and install them directly
 - GitHub Actions now validate the Linux flow in Docker before release packaging and upload both test logs and Linux bundle artifacts

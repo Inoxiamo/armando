@@ -1,5 +1,5 @@
 # armando — Central configuration
-# Installed by default into ~/.config/armando/configs/default.yaml
+# Installed by default into /home/<your-user>/.config/armando/configs/default.yaml (the app honors $XDG_CONFIG_HOME if set)
 
 default_backend: "chatgpt"
 auto_read_selection: true
@@ -23,18 +23,23 @@ aliases:
   ENG: "Traduci in Inglese il testo seguente, mantenendo il tono professionale:"
 
 gemini:
+  # Google Gemini / AI Studio API key; leave empty if you do not use this backend.
   api_key: "YOUR_GEMINI_API_KEY"
   model: "gemini-1.5-flash"
 
 chatgpt:
+  # OpenAI Responses API key, used by the `chatgpt` backend.
   api_key: "YOUR_OPENAI_API_KEY"
   model: "gpt-4o-mini"
 
 claude:
+  # Anthropic API key for `claude`.
   api_key: "YOUR_ANTHROPIC_API_KEY"
   model: "claude-3-5-sonnet-latest"
 
 ollama:
-  # You can change host or port here, for example http://localhost:1143
+  # Ollama uses a local server instead of an API key; update base_url if the server listens elsewhere.
   base_url: "http://localhost:11434"
   model: "gemma3:1b"
+
+# Leave an unused provider block as-is; the placeholders keep the backend dormant until you paste a real key or URL.

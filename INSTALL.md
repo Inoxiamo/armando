@@ -2,6 +2,17 @@
 
 This page explains how to install `armando` from a GitHub release on Linux, macOS, and Windows.
 
+## Before You Start
+
+`armando` needs at least one configured backend before it can answer prompts:
+
+- `ollama`: local server, no API key required
+- `chatgpt`: OpenAI API key
+- `gemini`: Google Gemini API key
+- `claude`: Anthropic API key
+
+If you want the simplest local setup, start with `ollama`.
+
 ## Download A Release
 
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>
@@ -53,20 +64,27 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-Installed paths:
+Installed paths (default XDG layout):
 
-- binary: `~/.local/bin/armando`
-- config: `~/.config/armando/configs/default.yaml`
-- themes: `~/.config/armando/themes/`
-- locales: `~/.config/armando/locales/`
-- assets: `~/.local/share/armando/assets/`
-- desktop entry: `~/.local/share/applications/armando.desktop`
+- binary: `$HOME/.local/bin/armando`
+- config: `$HOME/.config/armando/configs/default.yaml`
+- themes: `$HOME/.config/armando/themes/`
+- locales: `$HOME/.config/armando/locales/`
+- assets: `$HOME/.local/share/armando/assets/`
+- desktop entry: `$HOME/.local/share/applications/armando.desktop`
+
+Example with a full explicit path:
+
+- binary: `/home/<your-user>/.local/bin/armando`
+- config: `/home/<your-user>/.config/armando/configs/default.yaml`
 
 Launch it:
 
 ```bash
-~/.local/bin/armando
+"$HOME/.local/bin/armando"
 ```
+
+If you set `XDG_CONFIG_HOME` or `XDG_DATA_HOME`, the installer and the app honor those directories instead of the defaults above.
 
 ## macOS
 
@@ -80,9 +98,9 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-Installed paths:
+Installed paths (defaults for a typical user):
 
-- binary: `~/.local/bin/armando`
+- binary: `/Users/<your-user>/.local/bin/armando`
 - config: `~/Library/Application Support/armando/configs/default.yaml`
 - themes: `~/Library/Application Support/armando/themes/`
 - locales: `~/Library/Application Support/armando/locales/`
@@ -91,7 +109,7 @@ Installed paths:
 Launch it:
 
 ```bash
-~/.local/bin/armando
+"/Users/<your-user>/.local/bin/armando"
 ```
 
 ## Windows
@@ -111,13 +129,13 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\install.ps1
 ```
 
-Installed paths:
+Installed paths (defaults for a typical user):
 
-- binary: `%LOCALAPPDATA%\armando\bin\armando.exe`
-- config: `%APPDATA%\armando\configs\default.yaml`
-- themes: `%APPDATA%\armando\themes\`
-- locales: `%APPDATA%\armando\locales\`
-- assets: `%LOCALAPPDATA%\armando\assets\`
+- binary: `C:\Users\<your-user>\AppData\Local\armando\bin\armando.exe`
+- config: `C:\Users\<your-user>\AppData\Roaming\armando\configs\default.yaml`
+- themes: `C:\Users\<your-user>\AppData\Roaming\armando\themes\`
+- locales: `C:\Users\<your-user>\AppData\Roaming\armando\locales\`
+- assets: `C:\Users\<your-user>\AppData\Local\armando\assets\`
 
 Launch it:
 
@@ -136,11 +154,136 @@ Open the default config file for your OS and configure at least one backend:
 
 Config file locations:
 
-- Linux: `~/.config/armando/configs/default.yaml`
+- Linux: `$HOME/.config/armando/configs/default.yaml`
 - macOS: `~/Library/Application Support/armando/configs/default.yaml`
 - Windows: `%APPDATA%\armando\configs\default.yaml`
 
-If you use Ollama, make sure the local Ollama server is already running before launching `armando`.
+On Linux you can open the installed config with:
+
+```bash
+xdg-open "$HOME/.config/armando/configs/default.yaml"
+```
+
+or edit it directly:
+
+```bash
+nano "$HOME/.config/armando/configs/default.yaml"
+```
+
+### What To Edit In The Config
+
+The shipped config already contains the provider blocks. You usually only need to replace the placeholder value for the backend you want:
+
+```yaml
+gemini:
+  api_key: "YOUR_GEMINI_API_KEY"
+
+chatgpt:
+  api_key: "YOUR_OPENAI_API_KEY"
+
+claude:
+  api_key: "YOUR_ANTHROPIC_API_KEY"
+
+ollama:
+  base_url: "http://localhost:11434"
+```
+
+Also set `default_backend` to the backend you actually configured.
+
+### How To Generate And Use API Keys
+
+#### OpenAI (`chatgpt`)
+
+1. Sign in to your OpenAI developer account.
+2. Open the API keys page: <https://platform.openai.com/api-keys>.
+3. Generate a new secret API key.
+4. Copy it immediately and paste it into `chatgpt.api_key`.
+
+Example:
+
+```yaml
+default_backend: "chatgpt"
+
+chatgpt:
+  api_key: "sk-..."
+  model: "gpt-4o-mini"
+```
+
+#### Google Gemini (`gemini`)
+
+1. Open Google AI Studio: <https://aistudio.google.com/apikey>.
+2. Create an API key for the project you want to use with Gemini.
+3. Paste it into `gemini.api_key`.
+
+Example:
+
+```yaml
+default_backend: "gemini"
+
+gemini:
+  api_key: "AIza..."
+  model: "gemini-1.5-flash"
+```
+
+#### Anthropic Claude (`claude`)
+
+1. Sign in to the Anthropic Console: <https://console.anthropic.com/settings/keys>.
+2. Generate a new API key for your workspace.
+3. Paste it into `claude.api_key`.
+
+Example:
+
+```yaml
+default_backend: "claude"
+
+claude:
+  api_key: "sk-ant-..."
+  model: "claude-3-5-sonnet-latest"
+```
+
+#### Ollama (`ollama`)
+
+Ollama does not need an API key when it runs locally.
+
+1. Install Ollama on the same machine.
+2. Start the local Ollama server.
+3. Pull the model you want to use.
+4. Keep `ollama.base_url` pointed at that local server.
+
+Typical local setup:
+
+```bash
+ollama serve
+ollama pull gemma3:1b
+```
+
+Example config:
+
+```yaml
+default_backend: "ollama"
+
+ollama:
+  base_url: "http://localhost:11434"
+  model: "gemma3:1b"
+```
+
+If you use Ollama, make sure the local server is already running before launching `armando`.
+
+### Common First-Run Mistakes
+
+- The placeholder string such as `YOUR_OPENAI_API_KEY` was not replaced.
+- `default_backend` still points to a different provider than the one you configured.
+- The key was copied incompletely.
+- The selected model is not available for that provider account.
+- Ollama is installed, but the server is not running on `http://localhost:11434`.
+
+### First Launch Checklist
+
+1. Launch the installed binary (`/home/<your-user>/.local/bin/armando` on Linux).
+2. Open Settings and pick the backend you configured.
+3. Confirm the API key or Ollama URL is populated.
+4. Send a simple prompt like `Hello`.
+5. If the request fails, re-open Settings and verify the key, model, or Ollama URL.
 
 ## Next Steps
 

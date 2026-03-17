@@ -16,7 +16,7 @@
   Application entry point. Loads config and theme, configures the native viewport, and opens the popup UI directly.
 
 - `src/gui.rs`
-  Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, optional in-memory chat session state, backend selection, response rendering, settings, provider model discovery/picking, history, localization, and theme-aware widget styling.
+  Owns the main interaction flow: prompt entry, image attachments, clipboard screenshot paste, voice dictation, optional in-memory chat session state, backend selection, response rendering, settings, provider model discovery/picking, history, localization, and theme-aware widget styling. The file is still large, but the rendering path is now split into helper functions for the settings side panel, main panel, prompt/response sections, history, and provider subsections.
 
 - `src/config.rs`
   Defines the YAML configuration schema, persistence behavior, and config path resolution, including opt-in local history and debug logging.
@@ -72,11 +72,12 @@
 17. Opening the settings side panel can widen the viewport when needed so the main content area keeps a usable preview width
 18. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
 19. Downloaded release bundles can be installed directly through the bundled platform-specific install scripts
+20. Toolbar SVG textures are regenerated when `egui` reports a different `pixels_per_point` scale so icon rendering stays sharp after DPI changes
 
 ## UI Structure
 
 - Main popup area:
-  backend selector, settings access, generic mode toggle, prompt editor, compact text-badge toolbars for prompt/response actions, mouse-resizable prompt/response areas, and response area
+  backend selector, settings access, generic mode toggle, prompt editor, compact icon-based toolbars for prompt/response actions, mouse-resizable prompt/response areas, and response area
 - Settings side panel:
   language/theme/backend selectors, history/debug toggles, model/key sections, provider model dropdowns, credit indicators, and persistence feedback
 - History panel:
