@@ -2072,11 +2072,13 @@ fn render_provider_settings_sections(app: &mut AiPopupApp, ctx: &egui::Context, 
         ctx,
         ui,
         &settings_theme,
-        "settings_provider_gemini",
-        "gemini",
-        &health_check_for(&health_checks, "gemini"),
-        &app.tr("settings.gemini_key"),
-        &app.tr("settings.gemini_model"),
+        ProviderConfigSection {
+            id: "settings_provider_gemini",
+            provider: "gemini",
+            health_check: health_check_for(&health_checks, "gemini"),
+            primary_label: app.tr("settings.gemini_key"),
+            secondary_label: app.tr("settings.gemini_model"),
+        },
         |config| {
             config
                 .gemini
@@ -2096,11 +2098,13 @@ fn render_provider_settings_sections(app: &mut AiPopupApp, ctx: &egui::Context, 
         ctx,
         ui,
         &settings_theme,
-        "settings_provider_chatgpt",
-        "chatgpt",
-        &health_check_for(&health_checks, "chatgpt"),
-        &app.tr("settings.chatgpt_key"),
-        &app.tr("settings.chatgpt_model"),
+        ProviderConfigSection {
+            id: "settings_provider_chatgpt",
+            provider: "chatgpt",
+            health_check: health_check_for(&health_checks, "chatgpt"),
+            primary_label: app.tr("settings.chatgpt_key"),
+            secondary_label: app.tr("settings.chatgpt_model"),
+        },
         |config| {
             config
                 .chatgpt
@@ -2120,11 +2124,13 @@ fn render_provider_settings_sections(app: &mut AiPopupApp, ctx: &egui::Context, 
         ctx,
         ui,
         &settings_theme,
-        "settings_provider_claude",
-        "claude",
-        &health_check_for(&health_checks, "claude"),
-        &app.tr("settings.claude_key"),
-        &app.tr("settings.claude_model"),
+        ProviderConfigSection {
+            id: "settings_provider_claude",
+            provider: "claude",
+            health_check: health_check_for(&health_checks, "claude"),
+            primary_label: app.tr("settings.claude_key"),
+            secondary_label: app.tr("settings.claude_model"),
+        },
         |config| {
             config
                 .claude
@@ -2144,11 +2150,13 @@ fn render_provider_settings_sections(app: &mut AiPopupApp, ctx: &egui::Context, 
         ctx,
         ui,
         &settings_theme,
-        "settings_provider_ollama",
-        "ollama",
-        &health_check_for(&health_checks, "ollama"),
-        &app.tr("settings.ollama_url"),
-        &app.tr("settings.ollama_model"),
+        ProviderConfigSection {
+            id: "settings_provider_ollama",
+            provider: "ollama",
+            health_check: health_check_for(&health_checks, "ollama"),
+            primary_label: app.tr("settings.ollama_url"),
+            secondary_label: app.tr("settings.ollama_model"),
+        },
         |config| {
             config
                 .ollama
@@ -2177,16 +2185,20 @@ fn health_check_for(health_checks: &[HealthCheck], backend_name: &str) -> Health
         })
 }
 
+struct ProviderConfigSection {
+    id: &'static str,
+    provider: &'static str,
+    health_check: HealthCheck,
+    primary_label: String,
+    secondary_label: String,
+}
+
 fn render_provider_config_section<FGet, FSet>(
     app: &mut AiPopupApp,
     ctx: &egui::Context,
     ui: &mut egui::Ui,
     theme: &ResolvedTheme,
-    id: &str,
-    provider: &str,
-    health_check: &HealthCheck,
-    primary_label: &str,
-    secondary_label: &str,
+    section: ProviderConfigSection,
     get_values: FGet,
     set_values: FSet,
 ) where
@@ -2202,11 +2214,11 @@ fn render_provider_config_section<FGet, FSet>(
         ctx,
         ui,
         theme,
-        id,
-        provider,
-        health_check,
-        primary_label,
-        secondary_label,
+        section.id,
+        section.provider,
+        &section.health_check,
+        &section.primary_label,
+        &section.secondary_label,
         &mut primary_value,
         &mut secondary_value,
     ) {
