@@ -8,23 +8,33 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
 jobs:
   sonar:
     name: Sonar Scan
     runs-on: ubuntu-latest
-    if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
 
     steps:
+      - name: Skip when Sonar secrets are missing
+        if: ${{ env.SONAR_TOKEN == '' || env.SONAR_HOST_URL == '' }}
+        run: echo "Skipping Sonar scan because SONAR_TOKEN or SONAR_HOST_URL is not configured."
+
       - uses: actions/checkout@v4
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
         with:
           fetch-depth: 0
 
       - name: Install Rust toolchain
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
         uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy, llvm-tools-preview
 
       - name: Generate clippy and coverage reports
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
         shell: bash
         run: |
           chmod +x scripts/export-clippy-sonar-report.sh
@@ -33,7 +43,8 @@ jobs:
           scripts/export-rust-coverage.sh
 
       - name: SonarQube Scan
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
         uses: SonarSource/sonarqube-scan-action@v5
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}

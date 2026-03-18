@@ -60,48 +60,11 @@ jobs:
           name: armando-release-test-artifacts
           path: target/test-artifacts
 
-  sonar:
-    name: Sonar Release Gate
-    needs: test-container
-    runs-on: ubuntu-latest
-    if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.88.0
-        with:
-          components: clippy, llvm-tools-preview
-
-      - name: Generate clippy and coverage reports
-        shell: bash
-        run: |
-          chmod +x scripts/export-clippy-sonar-report.sh
-          chmod +x scripts/export-rust-coverage.sh
-          scripts/export-clippy-sonar-report.sh
-          scripts/export-rust-coverage.sh
-
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
   build:
     name: Build ${{ matrix.label }}
     needs:
       - test-container
-      - sonar
-    if: |
-      always() &&
-      needs.test-container.result == 'success' &&
-      (
-        needs.sonar.result == 'success' ||
-        needs.sonar.result == 'skipped'
-      )
+    if: ${{ needs.test-container.result == 'success' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
