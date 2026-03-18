@@ -57,9 +57,6 @@ cargo build --release --manifest-path "${ROOT_DIR}/Cargo.toml"
 
 install -m 0755 "${RELEASE_BIN}" "${BIN_DIR}/${APP_NAME}"
 
-if [[ ! -f "${CONFIG_DIR}/default.yaml" || "${FORCE_CONFIG_INSTALL:-0}" == "1" ]]; then
-fi
-
 install_config_file "${CONFIG_SOURCE}" "${CONFIG_DIR}/default.yaml"
 install_config_file "${PROMPT_TAGS_SOURCE}" "${CONFIG_ROOT}/prompt-tags.yaml"
 install_config_file "${GENERIC_PROMPTS_SOURCE}" "${CONFIG_ROOT}/generic-prompts.yaml"
