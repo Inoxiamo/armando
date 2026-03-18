@@ -7,7 +7,7 @@ strings:
   app.session_chat_mode: "Keep chat session"
   app.prompt_hint: "Write your prompt here..."
   app.helper_waiting: "Waiting for {backend}..."
-  app.helper_ready: "Enter sends, Shift+Enter adds a newline, Ctrl+Enter copies and closes, Esc closes."
+  app.helper_ready: "Enter adds a newline, Shift+Enter sends, Ctrl+Enter sends and then copies/closes after the response, Esc closes."
   app.attach_image: "Attach Image"
   app.paste_image: "Paste Screenshot"
   app.clear_images: "Clear Images"

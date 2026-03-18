@@ -5,7 +5,7 @@ strings:
   app.generic_mode: "汎用質問モード"
   app.prompt_hint: "ここにプロンプトを入力..."
   app.helper_waiting: "{backend} を待機中..."
-  app.helper_ready: "Enter で送信、Shift+Enter で改行、Esc で閉じます。"
+  app.helper_ready: "Enter で改行、Shift+Enter で送信、Ctrl+Enter で送信後に応答到着時コピーして閉じる、Esc で閉じます。"
   app.send: "送信"
   app.copy_response: "応答をコピー"
   app.show_history: "履歴を表示 ({count})"

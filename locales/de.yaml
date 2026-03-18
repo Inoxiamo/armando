@@ -5,7 +5,7 @@ strings:
   app.generic_mode: "Allgemeiner Fragemodus"
   app.prompt_hint: "Prompt hier eingeben..."
   app.helper_waiting: "Warte auf {backend}..."
-  app.helper_ready: "Enter sendet, Shift+Enter erzeugt eine neue Zeile, Esc schliesst."
+  app.helper_ready: "Enter erzeugt eine neue Zeile, Shift+Enter sendet, Strg+Enter sendet und kopiert/schliesst nach der Antwort, Esc schliesst."
   app.send: "Prompt senden"
   app.copy_response: "Antwort kopieren"
   app.show_history: "Verlauf anzeigen ({count})"

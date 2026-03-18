@@ -5,7 +5,7 @@ strings:
   app.generic_mode: "Modo de pregunta generica"
   app.prompt_hint: "Escribe aqui el prompt..."
   app.helper_waiting: "Esperando a {backend}..."
-  app.helper_ready: "Enter envia, Shift+Enter agrega una linea, Esc cierra."
+  app.helper_ready: "Enter agrega una linea, Shift+Enter envia, Ctrl+Enter envia y luego copia/cierra al llegar la respuesta, Esc cierra."
   app.send: "Enviar Prompt"
   app.copy_response: "Copiar Respuesta"
   app.show_history: "Mostrar Historial ({count})"

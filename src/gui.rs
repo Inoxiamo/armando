@@ -3,7 +3,7 @@ use eframe::egui;
 use egui::text::{CCursor, CCursorRange};
 use image::codecs::png::PngEncoder;
 use image::ImageEncoder;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -25,66 +25,70 @@ fn display_version() -> String {
 }
 
 fn load_toolbar_icon_textures(ctx: &egui::Context) -> HashMap<ToolbarIcon, egui::TextureHandle> {
-    let scale = ctx.pixels_per_point();
     let mut textures = HashMap::new();
-    for (icon, name, svg) in [
+    for (icon, name, source) in [
         (
             ToolbarIcon::Settings,
             "toolbar_settings",
-            include_str!("../assets/icons/settings.svg"),
+            IconTextureSource::Png(include_bytes!("../assets/icons/settings.png")),
         ),
         (
             ToolbarIcon::Send,
             "toolbar_send",
-            include_str!("../assets/icons/send.svg"),
+            IconTextureSource::Png(include_bytes!("../assets/icons/send.png")),
         ),
         (
             ToolbarIcon::Clear,
             "toolbar_clear",
-            include_str!("../assets/icons/close.svg"),
+            IconTextureSource::Svg(include_str!("../assets/icons/close.svg")),
         ),
         (
             ToolbarIcon::Mic,
             "toolbar_mic",
-            include_str!("../assets/icons/mic.svg"),
+            IconTextureSource::Png(include_bytes!("../assets/icons/mic.png")),
         ),
         (
             ToolbarIcon::Stop,
             "toolbar_stop",
-            include_str!("../assets/icons/stop.svg"),
+            IconTextureSource::Svg(include_str!("../assets/icons/stop.svg")),
         ),
         (
             ToolbarIcon::PasteImage,
             "toolbar_paste_image",
-            include_str!("../assets/icons/paste-image.svg"),
+            IconTextureSource::Png(include_bytes!("../assets/icons/screenshot.png")),
         ),
         (
             ToolbarIcon::AttachImage,
             "toolbar_attach_image",
-            include_str!("../assets/icons/attach-image.svg"),
+            IconTextureSource::Png(include_bytes!("../assets/icons/attach-image.png")),
         ),
         (
             ToolbarIcon::History,
             "toolbar_history",
-            include_str!("../assets/icons/history.svg"),
+            IconTextureSource::Svg(include_str!("../assets/icons/history.svg")),
         ),
         (
             ToolbarIcon::HistoryOpen,
             "toolbar_history_open",
-            include_str!("../assets/icons/history-open.svg"),
+            IconTextureSource::Svg(include_str!("../assets/icons/history-open.svg")),
         ),
         (
             ToolbarIcon::Copy,
             "toolbar_copy",
-            include_str!("../assets/icons/copy.svg"),
+            IconTextureSource::Svg(include_str!("../assets/icons/copy.svg")),
         ),
         (
             ToolbarIcon::Close,
             "toolbar_close",
-            include_str!("../assets/icons/close.svg"),
+            IconTextureSource::Svg(include_str!("../assets/icons/close.svg")),
         ),
     ] {
-        match render_svg_icon(svg, scale) {
+        let rendered = match source {
+            IconTextureSource::Png(bytes) => render_png_icon(bytes),
+            IconTextureSource::Svg(svg) => render_svg_icon(svg, ctx.pixels_per_point()),
+        };
+
+        match rendered {
             Ok(image) => {
                 let texture = ctx.load_texture(name, image, egui::TextureOptions::LINEAR);
                 textures.insert(icon, texture);
@@ -97,13 +101,95 @@ fn load_toolbar_icon_textures(ctx: &egui::Context) -> HashMap<ToolbarIcon, egui:
     textures
 }
 
-fn render_svg_icon(svg: &str, pixels_per_point: f32) -> Result<egui::ColorImage, String> {
-    const ICON_BUTTON_SIZE_POINTS: f32 = 36.0;
-    const ICON_OVERSAMPLE: f32 = 4.0;
-    const MIN_TARGET_SIZE: u32 = 128;
+enum IconTextureSource {
+    Svg(&'static str),
+    Png(&'static [u8]),
+}
 
-    let target_size = ((ICON_BUTTON_SIZE_POINTS * pixels_per_point * ICON_OVERSAMPLE).ceil()
-        as u32)
+fn render_png_icon(bytes: &[u8]) -> Result<egui::ColorImage, String> {
+    const PNG_ALPHA_THRESHOLD: u8 = 8;
+
+    let image = image::load_from_memory(bytes)
+        .map_err(|err| format!("Invalid PNG: {err}"))?
+        .to_rgba8();
+    let mut rgba = image.clone().into_raw();
+    let width = image.width() as usize;
+    let height = image.height() as usize;
+
+    strip_edge_frame(&mut rgba, width, height);
+    let cropped = crop_and_center_icon(&rgba, width, height, PNG_ALPHA_THRESHOLD);
+
+    Ok(egui::ColorImage::from_rgba_unmultiplied(
+        [width, height],
+        &cropped,
+    ))
+}
+
+fn strip_edge_frame(rgba: &mut [u8], width: usize, height: usize) {
+    const EDGE_ALPHA_THRESHOLD: u8 = 96;
+    const EDGE_WHITE_THRESHOLD: u8 = 240;
+
+    let mut queue = VecDeque::new();
+    let mut visited = vec![false; width * height];
+
+    let mut enqueue = |x: usize, y: usize, queue: &mut VecDeque<(usize, usize)>| {
+        let index = y * width + x;
+        if !visited[index] {
+            visited[index] = true;
+            queue.push_back((x, y));
+        }
+    };
+
+    for x in 0..width {
+        enqueue(x, 0, &mut queue);
+        enqueue(x, height - 1, &mut queue);
+    }
+    for y in 0..height {
+        enqueue(0, y, &mut queue);
+        enqueue(width - 1, y, &mut queue);
+    }
+
+    while let Some((x, y)) = queue.pop_front() {
+        let pixel_index = (y * width + x) * 4;
+        let r = rgba[pixel_index];
+        let g = rgba[pixel_index + 1];
+        let b = rgba[pixel_index + 2];
+        let a = rgba[pixel_index + 3];
+
+        let is_edge_frame = a >= EDGE_ALPHA_THRESHOLD
+            && r >= EDGE_WHITE_THRESHOLD
+            && g >= EDGE_WHITE_THRESHOLD
+            && b >= EDGE_WHITE_THRESHOLD;
+
+        if !is_edge_frame {
+            continue;
+        }
+
+        rgba[pixel_index..pixel_index + 4].fill(0);
+
+        if x > 0 {
+            enqueue(x - 1, y, &mut queue);
+        }
+        if x + 1 < width {
+            enqueue(x + 1, y, &mut queue);
+        }
+        if y > 0 {
+            enqueue(x, y - 1, &mut queue);
+        }
+        if y + 1 < height {
+            enqueue(x, y + 1, &mut queue);
+        }
+    }
+}
+
+fn render_svg_icon(svg: &str, pixels_per_point: f32) -> Result<egui::ColorImage, String> {
+    const ICON_DRAW_SIZE_POINTS: f32 = 32.0;
+    const ICON_OVERSAMPLE: f32 = 16.0;
+    const MIN_TARGET_SIZE: u32 = 768;
+    const ICON_CANVAS_PADDING: f32 = 0.03;
+    const ALPHA_CROP_THRESHOLD: u8 = 2;
+
+    let target_size = ((ICON_DRAW_SIZE_POINTS * pixels_per_point * ICON_OVERSAMPLE).ceil() as u32)
         .max(MIN_TARGET_SIZE);
 
     let options = resvg::usvg::Options::default();
@@ -112,19 +198,92 @@ fn render_svg_icon(svg: &str, pixels_per_point: f32) -> Result<egui::ColorImage,
     let size = tree.size().to_int_size();
     let mut pixmap = resvg::tiny_skia::Pixmap::new(target_size, target_size)
         .ok_or_else(|| "Could not allocate pixmap for SVG icon.".to_string())?;
+
+    let usable_size = target_size as f32 * (1.0 - ICON_CANVAS_PADDING * 2.0);
+    let scale = (usable_size / size.width() as f32).min(usable_size / size.height() as f32);
+    let rendered_width = size.width() as f32 * scale;
+    let rendered_height = size.height() as f32 * scale;
+    let translate_x = (target_size as f32 - rendered_width) * 0.5;
+    let translate_y = (target_size as f32 - rendered_height) * 0.5;
+
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::from_scale(
-            target_size as f32 / size.width() as f32,
-            target_size as f32 / size.height() as f32,
-        ),
+        resvg::tiny_skia::Transform::from_translate(translate_x, translate_y)
+            .post_scale(scale, scale),
         &mut pixmap.as_mut(),
+    );
+
+    let rgba = pixmap.data().to_vec();
+    let cropped = crop_and_center_icon(
+        &rgba,
+        target_size as usize,
+        target_size as usize,
+        ALPHA_CROP_THRESHOLD,
     );
 
     Ok(egui::ColorImage::from_rgba_unmultiplied(
         [target_size as usize, target_size as usize],
-        pixmap.data(),
+        &cropped,
     ))
+}
+
+fn crop_and_center_icon(rgba: &[u8], width: usize, height: usize, alpha_threshold: u8) -> Vec<u8> {
+    let Some((min_x, min_y, max_x, max_y)) = visible_bounds(rgba, width, height, alpha_threshold)
+    else {
+        return rgba.to_vec();
+    };
+
+    let content_width = max_x - min_x + 1;
+    let content_height = max_y - min_y + 1;
+    let side = content_width.max(content_height);
+    let offset_x = (width.saturating_sub(side)) / 2;
+    let offset_y = (height.saturating_sub(side)) / 2;
+    let inset_x = (side.saturating_sub(content_width)) / 2;
+    let inset_y = (side.saturating_sub(content_height)) / 2;
+
+    let mut normalized = vec![0_u8; rgba.len()];
+    for y in 0..content_height {
+        for x in 0..content_width {
+            let src_x = min_x + x;
+            let src_y = min_y + y;
+            let dst_x = offset_x + inset_x + x;
+            let dst_y = offset_y + inset_y + y;
+
+            let src_index = (src_y * width + src_x) * 4;
+            let dst_index = (dst_y * width + dst_x) * 4;
+            normalized[dst_index..dst_index + 4].copy_from_slice(&rgba[src_index..src_index + 4]);
+        }
+    }
+
+    normalized
+}
+
+fn visible_bounds(
+    rgba: &[u8],
+    width: usize,
+    height: usize,
+    alpha_threshold: u8,
+) -> Option<(usize, usize, usize, usize)> {
+    let mut min_x = width;
+    let mut min_y = height;
+    let mut max_x = 0;
+    let mut max_y = 0;
+    let mut found = false;
+
+    for y in 0..height {
+        for x in 0..width {
+            let alpha = rgba[(y * width + x) * 4 + 3];
+            if alpha > alpha_threshold {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+                found = true;
+            }
+        }
+    }
+
+    found.then_some((min_x, min_y, max_x, max_y))
 }
 
 struct VoiceRecording {
@@ -993,6 +1152,7 @@ fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui:
         ui.add_space(6.0);
         ui.checkbox(&mut app.session_chat_enabled, session_chat_label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(14.0);
             let gear = icon_action_button(
                 app,
                 ToolbarIcon::Settings,
@@ -1108,7 +1268,6 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
     });
     let input_output = input_output.inner;
     let input_resp = &input_output.response;
-    editor_resize_handle(ui, &app.theme, &mut app.prompt_editor_height, 160.0, 720.0);
 
     if !app.prompt_focus_initialized {
         input_resp.request_focus();
@@ -1125,24 +1284,29 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
 
     let prompt_has_focus = input_resp.has_focus() || ctx.memory(|mem| mem.has_focus(prompt_id));
 
-    if prompt_has_focus
+    let submit_with_shift_enter = prompt_has_focus
         && ctx.input(|i| {
             i.key_pressed(egui::Key::Enter)
-                && !i.modifiers.shift
+                && i.modifiers.shift
                 && !i.modifiers.ctrl
                 && !i.modifiers.alt
                 && !i.modifiers.command
-        })
-    {
+        });
+
+    if submit_with_shift_enter {
+        app.prompt = prompt_before_edit.clone();
         app.submit_prompt(ctx);
     }
 
-    if ctx.input(|i| {
+    let submit_with_copy_close = ctx.input(|i| {
         i.key_pressed(egui::Key::Enter)
             && (i.modifiers.ctrl || i.modifiers.command)
             && !i.modifiers.shift
             && !i.modifiers.alt
-    }) {
+    });
+
+    if submit_with_copy_close {
+        app.prompt = prompt_before_edit.clone();
         app.auto_copy_close_after_response = true;
         app.submit_prompt(ctx);
     }
@@ -1169,6 +1333,23 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
             let _ = app.try_attach_image_from_clipboard(false);
         }
     }
+
+    let prompt_helper_text = if app.is_loading {
+        app.tr_with(
+            "app.helper_waiting",
+            &[("backend", app.selected_backend.clone())],
+        )
+    } else {
+        app.tr("app.helper_ready")
+    };
+    editor_resize_row(
+        ui,
+        &app.theme,
+        &mut app.prompt_editor_height,
+        160.0,
+        720.0,
+        Some(prompt_helper_text.as_str()),
+    );
 }
 
 fn render_status_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
@@ -1203,18 +1384,7 @@ fn render_status_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
             ui.add_space(6.0);
         }
 
-        let helper_text = if app.is_loading {
-            app.tr_with(
-                "app.helper_waiting",
-                &[("backend", app.selected_backend.clone())],
-            )
-        } else {
-            app.tr("app.helper_ready")
-        };
-        ui.label(muted_label(&helper_text, app.theme.weak_text_color));
-
         if let Some(status) = &app.dictation_status {
-            ui.add_space(4.0);
             ui.label(muted_label(status, app.theme.weak_text_color));
         }
         if let Some(notice) = &app.attachment_notice {
@@ -1309,12 +1479,13 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
                 .font(egui::TextStyle::Monospace),
         );
     });
-    editor_resize_handle(
+    editor_resize_row(
         ui,
         &app.theme,
         &mut app.response_editor_height,
         140.0,
         720.0,
+        None,
     );
 }
 
@@ -1613,7 +1784,7 @@ fn icon_action_button(
     fill: egui::Color32,
     stroke_color: egui::Color32,
 ) -> impl egui::Widget {
-    icon_action_button_sized(app, icon, fill, stroke_color, egui::vec2(28.0, 28.0))
+    icon_action_button_sized(app, icon, fill, stroke_color, egui::vec2(31.0, 31.0))
 }
 
 fn icon_action_button_sized(
@@ -1663,15 +1834,13 @@ impl egui::Widget for IconActionButton {
                 self.stroke_color
             },
         );
+        let prefer_vector = matches!(self.icon, ToolbarIcon::History | ToolbarIcon::HistoryOpen);
 
         ui.painter()
             .rect(rect, egui::Rounding::same(10.0), fill, egui::Stroke::NONE);
-        if let Some(texture) = self.texture {
-            let image_rect = rect.shrink(5.0);
-            let image_rect = egui::Rect::from_min_max(
-                egui::pos2(image_rect.min.x.round(), image_rect.min.y.round()),
-                egui::pos2(image_rect.max.x.round(), image_rect.max.y.round()),
-            );
+        if let Some(texture) = self.texture.filter(|_| !prefer_vector) {
+            let (padding, offset) = icon_texture_layout(self.icon, self.size);
+            let image_rect = rect.shrink(padding).translate(offset);
             ui.painter().image(
                 texture.id(),
                 image_rect,
@@ -1692,6 +1861,16 @@ impl egui::Widget for IconActionButton {
             );
         }
         response
+    }
+}
+
+fn icon_texture_layout(icon: ToolbarIcon, size: egui::Vec2) -> (f32, egui::Vec2) {
+    let base_padding = (size.x.min(size.y) * 0.09).clamp(2.2, 3.2);
+    match icon {
+        ToolbarIcon::PasteImage => (base_padding, egui::vec2(-0.7, 0.0)),
+        ToolbarIcon::History => (base_padding, egui::vec2(0.6, 0.0)),
+        ToolbarIcon::HistoryOpen => (base_padding, egui::vec2(0.4, 0.0)),
+        _ => (base_padding, egui::Vec2::ZERO),
     }
 }
 
@@ -1922,6 +2101,23 @@ fn paint_settings_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::
     }
     painter.circle_stroke(center, radius + 1.0, stroke);
     painter.circle_stroke(center, radius * 0.45, stroke);
+}
+
+fn editor_resize_row(
+    ui: &mut egui::Ui,
+    theme: &ResolvedTheme,
+    height: &mut f32,
+    min_height: f32,
+    max_height: f32,
+    helper_text: Option<&str>,
+) {
+    if let Some(helper_text) = helper_text {
+        ui.label(muted_label(helper_text, theme.weak_text_color));
+        ui.add_space(4.0);
+        editor_resize_handle(ui, theme, height, min_height, max_height);
+    } else {
+        editor_resize_handle(ui, theme, height, min_height, max_height);
+    }
 }
 
 fn editor_resize_handle(

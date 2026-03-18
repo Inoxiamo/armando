@@ -7,7 +7,7 @@ strings:
   app.session_chat_mode: "Mantieni sessione chat"
   app.prompt_hint: "Scrivi qui il prompt..."
   app.helper_waiting: "In attesa di {backend}..."
-  app.helper_ready: "Invio invia, Shift+Invio va a capo, Ctrl+Invio copia e chiude, Esc chiude."
+  app.helper_ready: "Invio va a capo, Shift+Invio invia, Ctrl+Invio invia e poi copia/chiude alla risposta, Esc chiude."
   app.attach_image: "Allega Immagine"
   app.paste_image: "Incolla Screenshot"
   app.clear_images: "Rimuovi Immagini"
