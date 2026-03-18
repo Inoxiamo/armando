@@ -55,3 +55,23 @@ jobs:
           path: |
             target/test-artifacts/coverage/*
             target/test-artifacts/sonar/*
+
+  cross-platform-check:
+    name: Cross-Platform Check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          - os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Cargo check all targets
+        run: cargo check --locked --all-targets

@@ -1,5 +1,5 @@
 use armando::{config, gui, theme};
-use eframe::egui;
+use eframe::{egui, Theme};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -29,6 +29,8 @@ fn run_ui(cfg: config::Config) -> anyhow::Result<()> {
             .with_decorations(true)
             .with_title("armando")
             .with_icon(build_app_icon()),
+        follow_system_theme: false,
+        default_theme: Theme::Dark,
         ..Default::default()
     };
 

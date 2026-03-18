@@ -17,6 +17,8 @@ permissions:
 env:
   APP_NAME: armando
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+  RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.version || 'dev') || github.ref_name }}
 
 jobs:
   test-container:
@@ -29,12 +31,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.88.0
 
-      - name: Verify tag matches Cargo version
+      - name: Run pre-release checks
         shell: bash
         run: |
           chmod +x scripts/pre-release-check.sh
           chmod +x scripts/verify-release-version.sh
-          scripts/pre-release-check.sh "${{ github.ref_name }}"
+          if [[ -n "${RELEASE_TAG}" ]]; then
+            scripts/pre-release-check.sh "${RELEASE_TAG}"
+          else
+            scripts/pre-release-check.sh
+          fi
 
       - name: Build test runner image
         run: docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
@@ -134,7 +140,7 @@ jobs:
         shell: bash
         run: |
           chmod +x scripts/package-release.sh
-          VERSION="${{ github.event.inputs.version || github.ref_name || 'dev' }}"
+          VERSION="${RELEASE_VERSION}"
           scripts/package-release.sh \
             "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" \
             "${{ matrix.target }}" \
@@ -144,7 +150,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          VERSION="${{ github.event.inputs.version || github.ref_name || 'dev' }}"
+          VERSION="${RELEASE_VERSION}"
           FILE="target/dist/${{ env.APP_NAME }}-${VERSION}-${{ matrix.target }}.tar.gz"
           sha256sum "${FILE}" > "${FILE}.sha256"
 
@@ -152,7 +158,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } elseif ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $version = $env:RELEASE_VERSION
           $bundle = "target/dist/${env:APP_NAME}-$version-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "$bundle/configs" | Out-Null
           New-Item -ItemType Directory -Force -Path "$bundle/themes" | Out-Null
@@ -172,7 +178,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } elseif ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $version = $env:RELEASE_VERSION
           $file = "target/dist/$env:APP_NAME-$version-${{ matrix.target }}.zip"
           $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
           Set-Content -Path "$file.sha256" -Value "$hash  $(Split-Path -Leaf $file)"
