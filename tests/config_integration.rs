@@ -16,6 +16,7 @@ theme:
   name: nerv-hud
 ui:
   language: it
+  window_height: 700
 history:
   enabled: true
 logging:
@@ -32,6 +33,7 @@ logging:
     assert!(!config.auto_read_selection);
     assert_eq!(config.theme.name, "nerv-hud");
     assert_eq!(config.ui.language, "it");
+    assert_eq!(config.ui.window_height, 700.0);
     assert!(config.history.enabled);
     assert!(config.logging.enabled);
     assert_eq!(config.loaded_from.as_deref(), Some(config_path.as_path()));

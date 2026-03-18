@@ -9,6 +9,7 @@ It stays close to your workflow so you can ask questions, rewrite text, attach i
 - Multiple backends: `ollama`, `chatgpt`, `gemini`, `claude`
 - Text-assist mode and generic-question mode
 - External YAML configuration, themes, and locales
+- In-app GitHub release check with version comparison and download shortcut when an update is available
 - Optional local history and optional debug logging
 - Image attachments, clipboard image paste, and voice dictation
 - Release bundles for Linux, macOS, and Windows
@@ -37,6 +38,16 @@ armando/
 
 The ChatGPT backend uses OpenAI's Responses API.
 For exact install paths and first configuration on each OS, see [`INSTALL.md`](INSTALL.md).
+
+The `ui` section supports visual preferences such as language and initial window height. Example:
+
+```yaml
+ui:
+  language: "it"
+  window_height: 640
+```
+
+When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
 
 ## Keyboard Shortcuts
 

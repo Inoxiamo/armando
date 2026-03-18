@@ -39,6 +39,8 @@ pub struct ThemeConfig {
 pub struct UiConfig {
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_window_height")]
+    pub window_height: f32,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
@@ -57,6 +59,7 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             language: default_language(),
+            window_height: default_window_height(),
         }
     }
 }
@@ -109,6 +112,10 @@ fn default_theme_name() -> String {
 
 fn default_language() -> String {
     "en".to_string()
+}
+
+fn default_window_height() -> f32 {
+    640.0
 }
 
 impl Config {
@@ -175,6 +182,7 @@ mod tests {
         assert!(config.auto_read_selection);
         assert_eq!(config.theme.name, "default-dark");
         assert_eq!(config.ui.language, "en");
+        assert_eq!(config.ui.window_height, 640.0);
         assert!(!config.history.enabled);
         assert!(!config.logging.enabled);
     }

@@ -15,6 +15,7 @@ This page explains how `armando` versions, tags, and release artifacts are organ
 
 Use `latest` if you just want the newest published version.
 Use the full releases page if you need a specific stable build, prerelease, or older artifact.
+The desktop app also checks the latest GitHub release in-app and compares it with the local version from `Cargo.toml`.
 
 ## Release Flow
 
