@@ -28,6 +28,7 @@ Every release bundle includes:
 
 - the compiled binary
 - default config
+- bundled prompt preset files
 - bundled themes
 - bundled locales
 - bundled assets
@@ -68,6 +69,8 @@ Installed paths (default XDG layout):
 
 - binary: `$HOME/.local/bin/armando`
 - config: `$HOME/.config/armando/configs/default.yaml`
+- prompt tags: `$HOME/.config/armando/prompt-tags.yaml`
+- generic prompts: `$HOME/.config/armando/generic-prompts.yaml`
 - themes: `$HOME/.config/armando/themes/`
 - locales: `$HOME/.config/armando/locales/`
 - assets: `$HOME/.local/share/armando/assets/`
@@ -85,7 +88,7 @@ Launch it:
 ```
 
 If you set `XDG_CONFIG_HOME` or `XDG_DATA_HOME`, the installer and the app honor those directories instead of the defaults above.
-Existing config, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
+Existing config, prompt preset, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
 
 ## macOS
 
@@ -103,6 +106,8 @@ Installed paths (defaults for a typical user):
 
 - binary: `/Users/<your-user>/.local/bin/armando`
 - config: `~/Library/Application Support/armando/configs/default.yaml`
+- prompt tags: `~/Library/Application Support/armando/prompt-tags.yaml`
+- generic prompts: `~/Library/Application Support/armando/generic-prompts.yaml`
 - themes: `~/Library/Application Support/armando/themes/`
 - locales: `~/Library/Application Support/armando/locales/`
 - assets: `~/Library/Application Support/armando/assets/`
@@ -113,7 +118,7 @@ Launch it:
 "/Users/<your-user>/.local/bin/armando"
 ```
 
-Existing config, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
+Existing config, prompt preset, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
 
 ## Windows
 
@@ -136,6 +141,8 @@ Installed paths (defaults for a typical user):
 
 - binary: `C:\Users\<your-user>\AppData\Local\armando\bin\armando.exe`
 - config: `C:\Users\<your-user>\AppData\Roaming\armando\configs\default.yaml`
+- prompt tags: `C:\Users\<your-user>\AppData\Roaming\armando\prompt-tags.yaml`
+- generic prompts: `C:\Users\<your-user>\AppData\Roaming\armando\generic-prompts.yaml`
 - themes: `C:\Users\<your-user>\AppData\Roaming\armando\themes\`
 - locales: `C:\Users\<your-user>\AppData\Roaming\armando\locales\`
 - assets: `C:\Users\<your-user>\AppData\Local\armando\assets\`
@@ -160,6 +167,12 @@ Config file locations:
 - Linux: `$HOME/.config/armando/configs/default.yaml`
 - macOS: `~/Library/Application Support/armando/configs/default.yaml`
 - Windows: `%APPDATA%\armando\configs\default.yaml`
+
+Prompt preset file locations:
+
+- Linux: `$HOME/.config/armando/prompt-tags.yaml` and `$HOME/.config/armando/generic-prompts.yaml`
+- macOS: `~/Library/Application Support/armando/prompt-tags.yaml` and `~/Library/Application Support/armando/generic-prompts.yaml`
+- Windows: `%APPDATA%\armando\prompt-tags.yaml` and `%APPDATA%\armando\generic-prompts.yaml`
 
 On Linux you can open the installed config with:
 
@@ -192,6 +205,30 @@ ollama:
 ```
 
 Also set `default_backend` to the backend you actually configured.
+
+### Prompt Presets
+
+`armando` now reads prompt presets from two dedicated files loaded at startup:
+
+- `prompt-tags.yaml`: text-assist tags such as `ITA`, `WORK`, `EMAIL`, `SHORT`
+- `generic-prompts.yaml`: generic-question presets such as `CMD:`
+
+Example:
+
+```yaml
+tags:
+  ITA: "Traduci o riscrivi il risultato finale in italiano."
+  WORK: "Mantieni un contesto professionale e orientato al lavoro."
+```
+
+```yaml
+tags:
+  CMD:
+    instruction: "Se la risposta richiesta e un comando o una one-liner da terminale, restituisci solo il comando finale, senza markdown, senza backtick e senza testo aggiuntivo."
+    strip_header: true
+```
+
+The legacy `aliases` section in the main config is still supported, but the dedicated files are the recommended path for new custom presets.
 
 ### How To Generate And Use API Keys
 

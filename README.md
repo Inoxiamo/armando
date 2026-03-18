@@ -8,7 +8,7 @@ It stays close to your workflow so you can ask questions, rewrite text, attach i
 - Native desktop app in Rust with a compact popup UI
 - Multiple backends: `ollama`, `chatgpt`, `gemini`, `claude`
 - Text-assist mode and generic-question mode
-- External YAML configuration, themes, and locales
+- External YAML configuration, themes, locales, and prompt preset files
 - In-app GitHub release check with version comparison and download shortcut when an update is available
 - Optional local history and optional debug logging
 - Image attachments, clipboard image paste, and voice dictation
@@ -23,11 +23,13 @@ Start with [`INSTALL.md`](INSTALL.md) for the release download, OS-specific inst
 
 ## Configure It
 
-The repository ships defaults under [`configs/`](configs), [`themes/`](themes), and [`locales/`](locales).
+The repository ships defaults under [`configs/`](configs), [`themes/`](themes), [`locales/`](locales), plus [`prompt-tags.yaml`](prompt-tags.yaml) and [`generic-prompts.yaml`](generic-prompts.yaml).
 After installation, `armando` reads configuration from the platform-standard config directory for `armando`, with this structure:
 
 ```text
 armando/
+  prompt-tags.yaml
+  generic-prompts.yaml
   configs/
     default.yaml
   themes/
@@ -48,6 +50,37 @@ ui:
 ```
 
 When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
+
+## Prompt Presets
+
+Text-assist tags such as `ITA`, `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are now loaded from `prompt-tags.yaml`.
+Generic-question presets such as `CMD:` are loaded from `generic-prompts.yaml`.
+
+Both files are read only at startup. The merge order is:
+
+- built-in defaults
+- legacy `aliases` from `configs/default.yaml`
+- dedicated prompt files, which win on conflicts
+
+Example `prompt-tags.yaml`:
+
+```yaml
+tags:
+  ITA: "Traduci o riscrivi il risultato finale in italiano."
+  WORK: "Mantieni un contesto professionale e orientato al lavoro."
+  EMAIL: "Scrivi o riformula il testo come email professionale, chiara e naturale."
+```
+
+Example `generic-prompts.yaml`:
+
+```yaml
+tags:
+  CMD:
+    instruction: "Se la risposta richiesta e un comando o una one-liner da terminale, restituisci solo il comando finale, senza markdown, senza backtick e senza testo aggiuntivo."
+    strip_header: true
+```
+
+The old `aliases` section in the main config is still supported as a legacy fallback, but new presets should go into the dedicated files.
 
 ## Keyboard Shortcuts
 

@@ -38,6 +38,8 @@ function Install-ConfigFile {
 
 $DefaultConfig = Join-Path $BundleDir "configs\default.yaml"
 Install-ConfigFile $DefaultConfig (Join-Path $ConfigDir "default.yaml")
+Install-ConfigFile (Join-Path $BundleDir "prompt-tags.yaml") (Join-Path $ConfigRoot "prompt-tags.yaml")
+Install-ConfigFile (Join-Path $BundleDir "generic-prompts.yaml") (Join-Path $ConfigRoot "generic-prompts.yaml")
 
 $ThemeFiles = Join-Path $BundleDir "themes\*.yaml"
 if (Get-ChildItem $ThemeFiles -ErrorAction SilentlyContinue) {
@@ -65,6 +67,10 @@ Write-Host "  $(Join-Path $BinDir "$AppName.exe")"
 Write-Host ""
 Write-Host "Config:"
 Write-Host "  $(Join-Path $ConfigDir "default.yaml")"
+Write-Host ""
+Write-Host "Prompt presets:"
+Write-Host "  $(Join-Path $ConfigRoot "prompt-tags.yaml")"
+Write-Host "  $(Join-Path $ConfigRoot "generic-prompts.yaml")"
 Write-Host ""
 Write-Host "Themes:"
 Write-Host "  $ThemesDir"

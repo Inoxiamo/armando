@@ -6,6 +6,8 @@ const THEMES_DIR_NAME: &str = "themes";
 const LOCALES_DIR_NAME: &str = "locales";
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.yaml";
 const LEGACY_CONFIG_FILE_NAME: &str = "config.yaml";
+const PROMPT_TAGS_FILE_NAME: &str = "prompt-tags.yaml";
+const GENERIC_PROMPTS_FILE_NAME: &str = "generic-prompts.yaml";
 
 pub fn central_config_root() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join(APP_DIR_NAME))
@@ -134,6 +136,14 @@ pub fn candidate_locale_paths(code: &str) -> anyhow::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+pub fn candidate_prompt_tags_paths(loaded_from: Option<&Path>) -> anyhow::Result<Vec<PathBuf>> {
+    candidate_prompt_profile_paths(PROMPT_TAGS_FILE_NAME, loaded_from)
+}
+
+pub fn candidate_generic_prompt_paths(loaded_from: Option<&Path>) -> anyhow::Result<Vec<PathBuf>> {
+    candidate_prompt_profile_paths(GENERIC_PROMPTS_FILE_NAME, loaded_from)
+}
+
 pub fn discover_named_files(dir_name: &str, extension: &str) -> anyhow::Result<Vec<String>> {
     let mut names = Vec::new();
     let ext = extension.trim_start_matches('.');
@@ -192,6 +202,64 @@ fn theme_roots_from_root(root: &Path) -> Vec<PathBuf> {
 
 fn locale_roots_from_root(root: &Path) -> Vec<PathBuf> {
     vec![root.join(LOCALES_DIR_NAME), root.to_path_buf()]
+}
+
+fn candidate_prompt_profile_paths(
+    file_name: &str,
+    loaded_from: Option<&Path>,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+
+    if let Some(config_path) = loaded_from {
+        for root in prompt_profile_roots_from_config(config_path) {
+            push_unique(&mut paths, root.join(file_name));
+        }
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            for root in prompt_profile_roots_from_root(parent) {
+                push_unique(&mut paths, root.join(file_name));
+            }
+            if let Some(grandparent) = parent.parent().and_then(|path| path.parent()) {
+                for root in prompt_profile_roots_from_root(grandparent) {
+                    push_unique(&mut paths, root.join(file_name));
+                }
+            }
+        }
+    }
+
+    for root in prompt_profile_roots_from_root(&std::env::current_dir()?) {
+        push_unique(&mut paths, root.join(file_name));
+    }
+
+    if let Some(root) = central_config_root() {
+        for dir in prompt_profile_roots_from_root(&root) {
+            push_unique(&mut paths, dir.join(file_name));
+        }
+    }
+
+    Ok(paths)
+}
+
+fn prompt_profile_roots_from_config(config_path: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Some(parent) = config_path.parent() {
+        if parent.file_name().and_then(|name| name.to_str()) == Some(CONFIGS_DIR_NAME) {
+            if let Some(root) = parent.parent() {
+                roots.push(root.to_path_buf());
+                roots.push(root.join(CONFIGS_DIR_NAME));
+            }
+        }
+        roots.push(parent.to_path_buf());
+    }
+
+    roots
+}
+
+fn prompt_profile_roots_from_root(root: &Path) -> Vec<PathBuf> {
+    vec![root.to_path_buf(), root.join(CONFIGS_DIR_NAME)]
 }
 
 fn candidate_resource_roots(dir_name: &str) -> anyhow::Result<Vec<PathBuf>> {

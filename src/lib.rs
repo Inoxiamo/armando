@@ -5,5 +5,6 @@ pub mod gui;
 pub mod history;
 pub mod i18n;
 pub mod logging;
+pub mod prompt_profiles;
 pub mod theme;
 pub mod update;

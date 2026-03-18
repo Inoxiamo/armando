@@ -49,6 +49,8 @@ mkdir -p "${BIN_DIR}" "${CONFIG_DIR}" "${THEMES_DIR}" "${LOCALES_DIR}" "${ASSETS
 install -m 0755 "${BIN_SOURCE}" "${BIN_DIR}/${APP_NAME}"
 
 install_config_file "${BUNDLE_DIR}/configs/default.yaml" "${CONFIG_DIR}/default.yaml"
+install_config_file "${BUNDLE_DIR}/prompt-tags.yaml" "${CONFIG_ROOT}/prompt-tags.yaml"
+install_config_file "${BUNDLE_DIR}/generic-prompts.yaml" "${CONFIG_ROOT}/generic-prompts.yaml"
 
 if compgen -G "${BUNDLE_DIR}/themes/*.yaml" > /dev/null; then
   for theme_file in "${BUNDLE_DIR}"/themes/*.yaml; do
@@ -89,6 +91,10 @@ Binary:
 
 Config:
   ${CONFIG_DIR}/default.yaml
+
+Prompt presets:
+  ${CONFIG_ROOT}/prompt-tags.yaml
+  ${CONFIG_ROOT}/generic-prompts.yaml
 
 Themes:
   ${THEMES_DIR}

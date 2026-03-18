@@ -62,6 +62,8 @@ fn package_release_bundle_contains_runtime_assets() {
 
     assert!(listing.contains(&format!("{bundle_name}/armando")));
     assert!(listing.contains(&format!("{bundle_name}/configs/default.yaml")));
+    assert!(listing.contains(&format!("{bundle_name}/prompt-tags.yaml")));
+    assert!(listing.contains(&format!("{bundle_name}/generic-prompts.yaml")));
     assert!(listing.contains(&format!("{bundle_name}/themes/default-dark.yaml")));
     assert!(listing.contains(&format!("{bundle_name}/locales/en.yaml")));
     assert!(listing.contains(&format!("{bundle_name}/assets/armando.desktop")));
@@ -99,6 +101,16 @@ fn bundled_install_script_populates_home_profile_layout() {
     std::fs::copy(
         support::repo_root().join("configs/default.yaml"),
         configs_dir.join("default.yaml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        support::repo_root().join("prompt-tags.yaml"),
+        bundle_root.join("prompt-tags.yaml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        support::repo_root().join("generic-prompts.yaml"),
+        bundle_root.join("generic-prompts.yaml"),
     )
     .unwrap();
     std::fs::copy(
@@ -141,6 +153,10 @@ fn bundled_install_script_populates_home_profile_layout() {
     assert!(home_dir.join(".local/bin/armando").exists());
     assert!(home_dir
         .join(".config/armando/configs/default.yaml")
+        .exists());
+    assert!(home_dir.join(".config/armando/prompt-tags.yaml").exists());
+    assert!(home_dir
+        .join(".config/armando/generic-prompts.yaml")
         .exists());
     assert!(home_dir
         .join(".config/armando/themes/default-dark.yaml")
@@ -193,6 +209,16 @@ fn bundled_install_script_uses_macos_application_support_layout() {
     )
     .unwrap();
     std::fs::copy(
+        support::repo_root().join("prompt-tags.yaml"),
+        bundle_root.join("prompt-tags.yaml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        support::repo_root().join("generic-prompts.yaml"),
+        bundle_root.join("generic-prompts.yaml"),
+    )
+    .unwrap();
+    std::fs::copy(
         support::repo_root().join("themes/default-dark.yaml"),
         themes_dir.join("default-dark.yaml"),
     )
@@ -228,6 +254,12 @@ fn bundled_install_script_uses_macos_application_support_layout() {
     assert!(home_dir.join(".local/bin/armando").exists());
     assert!(home_dir
         .join("Library/Application Support/armando/configs/default.yaml")
+        .exists());
+    assert!(home_dir
+        .join("Library/Application Support/armando/prompt-tags.yaml")
+        .exists());
+    assert!(home_dir
+        .join("Library/Application Support/armando/generic-prompts.yaml")
         .exists());
     assert!(home_dir
         .join("Library/Application Support/armando/themes/default-dark.yaml")
@@ -273,6 +305,16 @@ fn bundled_install_script_preserves_existing_config_theme_and_locale_files() {
     )
     .unwrap();
     std::fs::write(
+        bundle_root.join("prompt-tags.yaml"),
+        "tags:\n  ITA: bundled\n",
+    )
+    .unwrap();
+    std::fs::write(
+        bundle_root.join("generic-prompts.yaml"),
+        "tags:\n  CMD:\n    instruction: bundled\n    strip_header: true\n",
+    )
+    .unwrap();
+    std::fs::write(
         themes_dir.join("default-dark.yaml"),
         "name: bundled-theme\n",
     )
@@ -310,6 +352,12 @@ fn bundled_install_script_preserves_existing_config_theme_and_locale_files() {
         "code: en\nname: User English\nstrings: {}\n",
     )
     .unwrap();
+    std::fs::write(config_root.join("prompt-tags.yaml"), "tags:\n  ITA: user\n").unwrap();
+    std::fs::write(
+        config_root.join("generic-prompts.yaml"),
+        "tags:\n  CMD:\n    instruction: user\n    strip_header: true\n",
+    )
+    .unwrap();
 
     let output = Command::new("bash")
         .arg("scripts/install.sh")
@@ -337,6 +385,14 @@ fn bundled_install_script_preserves_existing_config_theme_and_locale_files() {
         std::fs::read_to_string(config_root.join("locales/en.yaml")).unwrap(),
         "code: en\nname: User English\nstrings: {}\n"
     );
+    assert_eq!(
+        std::fs::read_to_string(config_root.join("prompt-tags.yaml")).unwrap(),
+        "tags:\n  ITA: user\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(config_root.join("generic-prompts.yaml")).unwrap(),
+        "tags:\n  CMD:\n    instruction: user\n    strip_header: true\n"
+    );
 
     support::remove_dir_all_if_exists(&temp_dir);
 }
@@ -352,4 +408,6 @@ fn windows_install_script_targets_appdata_and_assets() {
     assert!(script.contains("Join-Path $DataRoot \"assets\""));
     assert!(script.contains("Copy-Item (Join-Path $BundleAssetsDir \"*\") $AssetsDir"));
     assert!(script.contains("Install-ConfigFile"));
+    assert!(script.contains("prompt-tags.yaml"));
+    assert!(script.contains("generic-prompts.yaml"));
 }

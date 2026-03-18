@@ -15,6 +15,7 @@ use crate::backends::{ConversationTurn, HealthCheck, HealthLevel, ImageAttachmen
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
+use crate::prompt_profiles::PromptProfiles;
 use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
 use crate::update::{self, ReleaseInfo};
 
@@ -337,6 +338,7 @@ enum ReleaseCheckState {
 
 pub struct AiPopupApp {
     config: Config,
+    prompt_profiles: PromptProfiles,
     theme: ResolvedTheme,
     runtime: Arc<Runtime>,
 
@@ -389,6 +391,7 @@ impl AiPopupApp {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         config: Config,
+        prompt_profiles: PromptProfiles,
         theme: ResolvedTheme,
         runtime: Arc<Runtime>,
     ) -> Self {
@@ -423,6 +426,7 @@ impl AiPopupApp {
 
         let mut app = Self {
             config,
+            prompt_profiles,
             theme,
             runtime,
             prompt: initial_prompt,
@@ -618,6 +622,7 @@ impl AiPopupApp {
             PromptMode::TextAssist
         };
         let config = self.config.clone();
+        let prompt_profiles = self.prompt_profiles.clone();
         let async_response = self.async_response.clone();
         let ctx = ctx.clone();
         self.pending_submission = Some((backend.clone(), prompt.clone()));
@@ -634,6 +639,7 @@ impl AiPopupApp {
                     conversation,
                 },
                 &config,
+                &prompt_profiles,
                 mode,
             )
             .await;

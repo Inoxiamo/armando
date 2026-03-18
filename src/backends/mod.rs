@@ -6,7 +6,7 @@ pub mod ollama;
 use crate::config::Config;
 use crate::history;
 use crate::logging;
-use std::collections::HashMap;
+use crate::prompt_profiles::PromptProfiles;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,12 +51,18 @@ pub struct HealthCheck {
     pub detail: String,
 }
 
-pub async fn query(backend: &str, input: &QueryInput, config: &Config, mode: PromptMode) -> String {
+pub async fn query(
+    backend: &str,
+    input: &QueryInput,
+    config: &Config,
+    prompt_profiles: &PromptProfiles,
+    mode: PromptMode,
+) -> String {
     logging::log_request(config, backend, input);
     let prepared_prompt = prepare_prompt(
         &input.prompt,
         &input.conversation,
-        config,
+        prompt_profiles,
         mode,
         !input.images.is_empty(),
     );
@@ -454,13 +460,15 @@ fn error(backend: &str, summary: &str, detail: &str) -> HealthCheck {
 fn prepare_prompt(
     prompt: &str,
     conversation: &[ConversationTurn],
-    config: &Config,
+    prompt_profiles: &PromptProfiles,
     mode: PromptMode,
     has_images: bool,
 ) -> String {
     let (expanded_prompt, detected_tags) = match mode {
-        PromptMode::TextAssist => expand_tags(prompt, config.aliases.as_ref()),
-        PromptMode::GenericQuestion => expand_generic_question_prompt(prompt),
+        PromptMode::TextAssist => expand_tags(prompt, &prompt_profiles.text_assist_tags),
+        PromptMode::GenericQuestion => {
+            expand_generic_question_prompt(prompt, &prompt_profiles.generic_question_tags)
+        }
     };
     let mut instructions = match mode {
         PromptMode::TextAssist => vec![
@@ -488,15 +496,19 @@ fn prepare_prompt(
     }
 
     if mode == PromptMode::GenericQuestion {
-        if detected_tags.iter().any(|tag| tag == "CMD") {
-            instructions.push(
-                "Se la risposta richiesta e un comando o una one-liner da terminale, restituisci solo il comando finale, senza markdown, senza backtick e senza testo aggiuntivo."
-                    .to_string(),
-            );
-        } else {
+        let generic_tag_instructions = detected_tags
+            .iter()
+            .filter_map(|tag| prompt_profiles.generic_question_tags.get(tag))
+            .map(|tag| tag.instruction.trim().to_string())
+            .filter(|instruction| !instruction.is_empty())
+            .collect::<Vec<_>>();
+
+        if generic_tag_instructions.is_empty() {
             instructions.push(
                 "Formatta la risposta in Markdown chiaro e leggibile quando utile.".to_string(),
             );
+        } else {
+            instructions.extend(generic_tag_instructions);
         }
     }
 
@@ -545,21 +557,33 @@ fn prepare_prompt(
     )
 }
 
-fn expand_generic_question_prompt(prompt: &str) -> (String, Vec<String>) {
+fn expand_generic_question_prompt(
+    prompt: &str,
+    generic_tags: &std::collections::HashMap<String, crate::prompt_profiles::GenericPromptTag>,
+) -> (String, Vec<String>) {
     let Some(colon_idx) = prompt.find(':') else {
         return (prompt.trim().to_string(), Vec::new());
     };
 
     let header = prompt[..colon_idx].trim();
     let body = prompt[colon_idx + 1..].trim_start();
-    if header.eq_ignore_ascii_case("CMD") && !body.is_empty() {
-        return (body.trim().to_string(), vec!["CMD".to_string()]);
+    let normalized = normalize_tag(header);
+    if let Some(tag) = generic_tags.get(&normalized) {
+        let effective_prompt = if tag.strip_header && !body.is_empty() {
+            body.trim().to_string()
+        } else {
+            prompt.trim().to_string()
+        };
+        return (effective_prompt, vec![normalized]);
     }
 
     (prompt.trim().to_string(), Vec::new())
 }
 
-fn expand_tags(prompt: &str, aliases: Option<&HashMap<String, String>>) -> (String, Vec<String>) {
+fn expand_tags(
+    prompt: &str,
+    text_assist_tags: &std::collections::HashMap<String, String>,
+) -> (String, Vec<String>) {
     let Some(colon_idx) = prompt.find(':') else {
         return (prompt.to_string(), Vec::new());
     };
@@ -570,7 +594,7 @@ fn expand_tags(prompt: &str, aliases: Option<&HashMap<String, String>>) -> (Stri
         return (prompt.to_string(), Vec::new());
     }
 
-    let tags = parse_header_tags(header, aliases);
+    let tags = parse_header_tags(header, text_assist_tags);
     if tags.is_empty() {
         return (prompt.to_string(), Vec::new());
     }
@@ -579,13 +603,7 @@ fn expand_tags(prompt: &str, aliases: Option<&HashMap<String, String>>) -> (Stri
     let mut applied_tags = Vec::new();
 
     for tag in tags {
-        if let Some(instruction) = built_in_tag_instruction(&tag) {
-            instructions.push(instruction.to_string());
-            applied_tags.push(tag);
-            continue;
-        }
-
-        if let Some(custom) = aliases.and_then(|map| map.get(&tag)) {
+        if let Some(custom) = text_assist_tags.get(&tag) {
             instructions.push(custom.trim().to_string());
             applied_tags.push(tag);
         }
@@ -601,7 +619,10 @@ fn expand_tags(prompt: &str, aliases: Option<&HashMap<String, String>>) -> (Stri
     )
 }
 
-fn parse_header_tags(header: &str, aliases: Option<&HashMap<String, String>>) -> Vec<String> {
+fn parse_header_tags(
+    header: &str,
+    text_assist_tags: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
     let tags: Vec<String> = header
         .split(|c: char| c.is_whitespace() || matches!(c, '-' | '+' | ',' | '/' | '|'))
         .filter_map(|part| {
@@ -610,23 +631,17 @@ fn parse_header_tags(header: &str, aliases: Option<&HashMap<String, String>>) ->
                 return None;
             }
 
-            let normalized = part.to_uppercase();
-            let valid = normalized
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+            let normalized = normalize_tag(part);
+            let valid = !normalized.is_empty()
+                && normalized
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
 
             valid.then_some(normalized)
         })
         .collect();
 
-    let all_known = tags.iter().all(|tag| {
-        built_in_tag_instruction(tag).is_some()
-            || aliases.is_some_and(|map| map.contains_key(tag))
-            || matches!(
-                tag.as_str(),
-                "EMAIL" | "MAIL" | "WORK" | "FORMAL" | "CASUAL" | "SHORT" | "LONG" | "CMD"
-            )
-    });
+    let all_known = tags.iter().all(|tag| text_assist_tags.contains_key(tag));
 
     if all_known {
         tags
@@ -635,27 +650,8 @@ fn parse_header_tags(header: &str, aliases: Option<&HashMap<String, String>>) ->
     }
 }
 
-fn built_in_tag_instruction(tag: &str) -> Option<&'static str> {
-    match tag {
-        "GMAIL" | "EMAIL" | "MAIL" => {
-            Some("Scrivi o riformula il testo come email professionale, chiara e naturale.")
-        }
-        "SLACK" => {
-            Some("Scrivi o riformula il testo come messaggio Slack breve, operativo e naturale.")
-        }
-        "WHATSAPP" => Some(
-            "Scrivi o riformula il testo come messaggio WhatsApp diretto, semplice e colloquiale.",
-        ),
-        "ITA" => Some("Traduci o riscrivi il risultato finale in italiano."),
-        "ENG" => Some("Translate or rewrite the final result in English."),
-        "FORMAL" => Some("Usa un tono formale e professionale."),
-        "CASUAL" => Some("Usa un tono informale e naturale."),
-        "WORK" => Some("Mantieni un contesto professionale e orientato al lavoro."),
-        "SHORT" => Some("Mantieni il risultato breve e sintetico."),
-        "LONG" => Some("Puoi essere piu completo, ma resta diretto."),
-        "CMD" => Some("La risposta finale deve essere orientata a un comando eseguibile."),
-        _ => None,
-    }
+fn normalize_tag(tag: &str) -> String {
+    tag.trim().to_uppercase()
 }
 
 #[cfg(test)]
@@ -664,6 +660,8 @@ mod tests {
     use crate::config::{
         ClaudeConfig, Config, HistoryConfig, LoggingConfig, ThemeConfig, UiConfig,
     };
+    use crate::prompt_profiles::{GenericPromptTag, PromptProfiles};
+    use std::collections::HashMap;
 
     fn test_config() -> Config {
         Config {
@@ -688,12 +686,25 @@ mod tests {
         }
     }
 
+    fn test_profiles() -> PromptProfiles {
+        let config = test_config();
+        let mut profiles = PromptProfiles::default_built_in();
+        if let Some(aliases) = config.aliases.as_ref() {
+            for (tag, instruction) in aliases {
+                profiles
+                    .text_assist_tags
+                    .insert(tag.to_uppercase(), instruction.clone());
+            }
+        }
+        profiles
+    }
+
     #[test]
     fn text_assist_prompt_keeps_cleanup_instructions() {
         let prompt = prepare_prompt(
             "sistema questo testo",
             &[],
-            &test_config(),
+            &test_profiles(),
             PromptMode::TextAssist,
             false,
         );
@@ -708,7 +719,7 @@ mod tests {
         let prompt = prepare_prompt(
             "come funziona docker compose?",
             &[],
-            &test_config(),
+            &test_profiles(),
             PromptMode::GenericQuestion,
             false,
         );
@@ -725,7 +736,7 @@ mod tests {
         let prompt = prepare_prompt(
             "CMD: dammi il comando per vedere i processi",
             &[],
-            &test_config(),
+            &test_profiles(),
             PromptMode::GenericQuestion,
             false,
         );
@@ -741,7 +752,7 @@ mod tests {
         let prompt = prepare_prompt(
             "TITLE: armando popup ai",
             &[],
-            &test_config(),
+            &test_profiles(),
             PromptMode::GenericQuestion,
             false,
         );
@@ -753,8 +764,8 @@ mod tests {
 
     #[test]
     fn expand_tags_applies_builtin_and_custom_aliases() {
-        let (expanded, tags) =
-            expand_tags("CMD TITLE: hello world", test_config().aliases.as_ref());
+        let profiles = test_profiles();
+        let (expanded, tags) = expand_tags("CMD TITLE: hello world", &profiles.text_assist_tags);
 
         assert_eq!(tags, vec!["CMD".to_string(), "TITLE".to_string()]);
         assert!(
@@ -766,7 +777,8 @@ mod tests {
 
     #[test]
     fn unknown_tags_disable_header_expansion() {
-        let (expanded, tags) = expand_tags("NOPE: hello world", test_config().aliases.as_ref());
+        let profiles = test_profiles();
+        let (expanded, tags) = expand_tags("NOPE: hello world", &profiles.text_assist_tags);
 
         assert!(tags.is_empty());
         assert_eq!(expanded, "NOPE: hello world");
@@ -774,8 +786,33 @@ mod tests {
 
     #[test]
     fn parse_header_tags_accepts_cmd() {
-        let tags = parse_header_tags("CMD SHORT", test_config().aliases.as_ref());
+        let profiles = test_profiles();
+        let tags = parse_header_tags("CMD SHORT", &profiles.text_assist_tags);
         assert_eq!(tags, vec!["CMD".to_string(), "SHORT".to_string()]);
+    }
+
+    #[test]
+    fn generic_question_uses_externalized_custom_tag() {
+        let mut profiles = test_profiles();
+        profiles.generic_question_tags.insert(
+            "SQL".to_string(),
+            GenericPromptTag {
+                instruction: "Rispondi solo con SQL valido.".to_string(),
+                strip_header: true,
+            },
+        );
+
+        let prompt = prepare_prompt(
+            "SQL: elenco utenti ordinati per nome",
+            &[],
+            &profiles,
+            PromptMode::GenericQuestion,
+            false,
+        );
+
+        assert!(prompt.contains("Rispondi solo con SQL valido."));
+        assert!(prompt.contains("Richiesta utente:\nelenco utenti ordinati per nome"));
+        assert!(!prompt.contains("Formatta la risposta in Markdown chiaro e leggibile"));
     }
 
     #[test]
@@ -786,7 +823,7 @@ mod tests {
                 user_prompt: "come stai?".to_string(),
                 assistant_response: "bene".to_string(),
             }],
-            &test_config(),
+            &test_profiles(),
             PromptMode::GenericQuestion,
             false,
         );

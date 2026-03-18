@@ -1,4 +1,4 @@
-use armando::{config, gui, theme};
+use armando::{config, gui, prompt_profiles, theme};
 use eframe::{egui, Theme};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -10,10 +10,14 @@ fn main() -> anyhow::Result<()> {
 
     let _args: Vec<String> = std::env::args().collect();
     let cfg = config::Config::load()?;
-    run_ui(cfg)
+    let prompt_profiles = prompt_profiles::PromptProfiles::load(&cfg)?;
+    run_ui(cfg, prompt_profiles)
 }
 
-fn run_ui(cfg: config::Config) -> anyhow::Result<()> {
+fn run_ui(
+    cfg: config::Config,
+    prompt_profiles: prompt_profiles::PromptProfiles,
+) -> anyhow::Result<()> {
     // Create tokio runtime for async backend queries
     let rt = Arc::new(Runtime::new()?);
     let theme = load_theme(&cfg)?;
@@ -37,7 +41,7 @@ fn run_ui(cfg: config::Config) -> anyhow::Result<()> {
     eframe::run_native(
         "armando",
         options,
-        Box::new(move |cc| Box::new(gui::AiPopupApp::new(cc, cfg, theme, rt))),
+        Box::new(move |cc| Box::new(gui::AiPopupApp::new(cc, cfg, prompt_profiles, theme, rt))),
     )
     .map_err(|e| anyhow::anyhow!("eframe error: {e:?}"))
 }

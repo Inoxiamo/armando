@@ -28,8 +28,23 @@ LOCALES_DIR="${CONFIG_ROOT}/locales"
 ASSETS_DIR="${DATA_ROOT}/assets"
 RELEASE_BIN="${TARGET_DIR}/release/${APP_NAME}"
 CONFIG_SOURCE="${ROOT_DIR}/configs/default.yaml"
+PROMPT_TAGS_SOURCE="${ROOT_DIR}/prompt-tags.yaml"
+GENERIC_PROMPTS_SOURCE="${ROOT_DIR}/generic-prompts.yaml"
 ICON_SOURCE="${ROOT_DIR}/assets/${APP_NAME}.svg"
 DESKTOP_SOURCE="${ROOT_DIR}/assets/${APP_NAME}.desktop"
+
+install_config_file() {
+  local source_path="$1"
+  local destination_path="$2"
+
+  if [[ ! -f "${source_path}" ]]; then
+    return
+  fi
+
+  if [[ ! -f "${destination_path}" || "${FORCE_CONFIG_INSTALL:-0}" == "1" ]]; then
+    install -m 0644 "${source_path}" "${destination_path}"
+  fi
+}
 
 mkdir -p \
   "${BIN_DIR}" \
@@ -43,8 +58,11 @@ cargo build --release --manifest-path "${ROOT_DIR}/Cargo.toml"
 install -m 0755 "${RELEASE_BIN}" "${BIN_DIR}/${APP_NAME}"
 
 if [[ ! -f "${CONFIG_DIR}/default.yaml" || "${FORCE_CONFIG_INSTALL:-0}" == "1" ]]; then
-  install -m 0644 "${CONFIG_SOURCE}" "${CONFIG_DIR}/default.yaml"
 fi
+
+install_config_file "${CONFIG_SOURCE}" "${CONFIG_DIR}/default.yaml"
+install_config_file "${PROMPT_TAGS_SOURCE}" "${CONFIG_ROOT}/prompt-tags.yaml"
+install_config_file "${GENERIC_PROMPTS_SOURCE}" "${CONFIG_ROOT}/generic-prompts.yaml"
 
 for theme_file in "${ROOT_DIR}"/themes/*.yaml; do
   install -m 0644 "${theme_file}" "${THEMES_DIR}/$(basename "${theme_file}")"
@@ -73,6 +91,10 @@ Binary:
 
 Config:
   ${CONFIG_DIR}/default.yaml
+
+Prompt presets:
+  ${CONFIG_ROOT}/prompt-tags.yaml
+  ${CONFIG_ROOT}/generic-prompts.yaml
 
 Themes:
   ${THEMES_DIR}
