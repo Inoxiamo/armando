@@ -243,6 +243,105 @@ fn bundled_install_script_uses_macos_application_support_layout() {
 }
 
 #[test]
+fn bundled_install_script_preserves_existing_config_theme_and_locale_files() {
+    let _guard = support::test_lock();
+    let temp_dir = support::unique_temp_dir("bundle-preserve");
+    let bundle_root = temp_dir.join("bundle");
+    let scripts_dir = bundle_root.join("scripts");
+    let configs_dir = bundle_root.join("configs");
+    let themes_dir = bundle_root.join("themes");
+    let locales_dir = bundle_root.join("locales");
+    let assets_dir = bundle_root.join("assets");
+    std::fs::create_dir_all(&scripts_dir).unwrap();
+    std::fs::create_dir_all(&configs_dir).unwrap();
+    std::fs::create_dir_all(&themes_dir).unwrap();
+    std::fs::create_dir_all(&locales_dir).unwrap();
+    std::fs::create_dir_all(&assets_dir).unwrap();
+
+    let binary_path = bundle_root.join("armando");
+    std::fs::write(&binary_path, "#!/usr/bin/env bash\necho installed\n").unwrap();
+    support::make_executable(&binary_path);
+    std::fs::copy(
+        support::repo_root().join("scripts/release-install.sh"),
+        scripts_dir.join("install.sh"),
+    )
+    .unwrap();
+    support::make_executable(&scripts_dir.join("install.sh"));
+    std::fs::write(
+        configs_dir.join("default.yaml"),
+        "default_backend: ollama\n",
+    )
+    .unwrap();
+    std::fs::write(
+        themes_dir.join("default-dark.yaml"),
+        "name: bundled-theme\n",
+    )
+    .unwrap();
+    std::fs::write(
+        locales_dir.join("en.yaml"),
+        "code: en\nname: English\nstrings: {}\n",
+    )
+    .unwrap();
+    std::fs::copy(
+        support::repo_root().join("assets/armando.svg"),
+        assets_dir.join("armando.svg"),
+    )
+    .unwrap();
+
+    let home_dir = temp_dir.join("home");
+    let config_root = home_dir.join(".config/armando");
+    let data_root = home_dir.join(".local/share/armando");
+    std::fs::create_dir_all(config_root.join("configs")).unwrap();
+    std::fs::create_dir_all(config_root.join("themes")).unwrap();
+    std::fs::create_dir_all(config_root.join("locales")).unwrap();
+    std::fs::create_dir_all(data_root.join("assets")).unwrap();
+    std::fs::write(
+        config_root.join("configs/default.yaml"),
+        "default_backend: chatgpt\n",
+    )
+    .unwrap();
+    std::fs::write(
+        config_root.join("themes/default-dark.yaml"),
+        "name: user-theme\n",
+    )
+    .unwrap();
+    std::fs::write(
+        config_root.join("locales/en.yaml"),
+        "code: en\nname: User English\nstrings: {}\n",
+    )
+    .unwrap();
+
+    let output = Command::new("bash")
+        .arg("scripts/install.sh")
+        .current_dir(&bundle_root)
+        .env("HOME", &home_dir)
+        .env("XDG_CONFIG_HOME", home_dir.join(".config"))
+        .env("XDG_DATA_HOME", home_dir.join(".local/share"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(config_root.join("configs/default.yaml")).unwrap(),
+        "default_backend: chatgpt\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(config_root.join("themes/default-dark.yaml")).unwrap(),
+        "name: user-theme\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(config_root.join("locales/en.yaml")).unwrap(),
+        "code: en\nname: User English\nstrings: {}\n"
+    );
+
+    support::remove_dir_all_if_exists(&temp_dir);
+}
+
+#[test]
 fn windows_install_script_targets_appdata_and_assets() {
     let script =
         std::fs::read_to_string(support::repo_root().join("scripts/release-install.ps1")).unwrap();
@@ -252,4 +351,5 @@ fn windows_install_script_targets_appdata_and_assets() {
     assert!(script.contains("Join-Path $DataRoot \"bin\""));
     assert!(script.contains("Join-Path $DataRoot \"assets\""));
     assert!(script.contains("Copy-Item (Join-Path $BundleAssetsDir \"*\") $AssetsDir"));
+    assert!(script.contains("Install-ConfigFile"));
 }

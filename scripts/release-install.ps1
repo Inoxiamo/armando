@@ -20,19 +20,37 @@ if (!(Test-Path $BinarySource)) {
 New-Item -ItemType Directory -Force -Path $BinDir, $ConfigDir, $ThemesDir, $LocalesDir, $AssetsDir | Out-Null
 Copy-Item $BinarySource (Join-Path $BinDir "$AppName.exe") -Force
 
-$DefaultConfig = Join-Path $BundleDir "configs\default.yaml"
-if (Test-Path $DefaultConfig) {
-    Copy-Item $DefaultConfig (Join-Path $ConfigDir "default.yaml") -Force
+function Install-ConfigFile {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    if (!(Test-Path $SourcePath)) {
+        return
+    }
+
+    $forceConfigInstall = $env:FORCE_CONFIG_INSTALL -eq "1"
+    if (!(Test-Path $DestinationPath) -or $forceConfigInstall) {
+        Copy-Item $SourcePath $DestinationPath -Force
+    }
 }
+
+$DefaultConfig = Join-Path $BundleDir "configs\default.yaml"
+Install-ConfigFile $DefaultConfig (Join-Path $ConfigDir "default.yaml")
 
 $ThemeFiles = Join-Path $BundleDir "themes\*.yaml"
 if (Get-ChildItem $ThemeFiles -ErrorAction SilentlyContinue) {
-    Copy-Item $ThemeFiles $ThemesDir -Force
+    foreach ($themeFile in Get-ChildItem $ThemeFiles) {
+        Install-ConfigFile $themeFile.FullName (Join-Path $ThemesDir $themeFile.Name)
+    }
 }
 
 $LocaleFiles = Join-Path $BundleDir "locales\*.yaml"
 if (Get-ChildItem $LocaleFiles -ErrorAction SilentlyContinue) {
-    Copy-Item $LocaleFiles $LocalesDir -Force
+    foreach ($localeFile in Get-ChildItem $LocaleFiles) {
+        Install-ConfigFile $localeFile.FullName (Join-Path $LocalesDir $localeFile.Name)
+    }
 }
 
 $BundleAssetsDir = Join-Path $BundleDir "assets"

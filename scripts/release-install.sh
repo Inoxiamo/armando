@@ -27,6 +27,19 @@ THEMES_DIR="${CONFIG_ROOT}/themes"
 LOCALES_DIR="${CONFIG_ROOT}/locales"
 ASSETS_DIR="${DATA_ROOT}/assets"
 
+install_config_file() {
+  local source_path="$1"
+  local destination_path="$2"
+
+  if [[ ! -f "${source_path}" ]]; then
+    return
+  fi
+
+  if [[ ! -f "${destination_path}" || "${FORCE_CONFIG_INSTALL:-0}" == "1" ]]; then
+    install -m 0644 "${source_path}" "${destination_path}"
+  fi
+}
+
 if [[ ! -f "${BIN_SOURCE}" ]]; then
   echo "Could not find ${APP_NAME} binary in bundle root: ${BIN_SOURCE}" >&2
   exit 1
@@ -35,19 +48,17 @@ fi
 mkdir -p "${BIN_DIR}" "${CONFIG_DIR}" "${THEMES_DIR}" "${LOCALES_DIR}" "${ASSETS_DIR}"
 install -m 0755 "${BIN_SOURCE}" "${BIN_DIR}/${APP_NAME}"
 
-if [[ -f "${BUNDLE_DIR}/configs/default.yaml" ]]; then
-  install -m 0644 "${BUNDLE_DIR}/configs/default.yaml" "${CONFIG_DIR}/default.yaml"
-fi
+install_config_file "${BUNDLE_DIR}/configs/default.yaml" "${CONFIG_DIR}/default.yaml"
 
 if compgen -G "${BUNDLE_DIR}/themes/*.yaml" > /dev/null; then
   for theme_file in "${BUNDLE_DIR}"/themes/*.yaml; do
-    install -m 0644 "${theme_file}" "${THEMES_DIR}/$(basename "${theme_file}")"
+    install_config_file "${theme_file}" "${THEMES_DIR}/$(basename "${theme_file}")"
   done
 fi
 
 if compgen -G "${BUNDLE_DIR}/locales/*.yaml" > /dev/null; then
   for locale_file in "${BUNDLE_DIR}"/locales/*.yaml; do
-    install -m 0644 "${locale_file}" "${LOCALES_DIR}/$(basename "${locale_file}")"
+    install_config_file "${locale_file}" "${LOCALES_DIR}/$(basename "${locale_file}")"
   done
 fi
 

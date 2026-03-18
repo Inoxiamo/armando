@@ -85,6 +85,7 @@ Launch it:
 ```
 
 If you set `XDG_CONFIG_HOME` or `XDG_DATA_HOME`, the installer and the app honor those directories instead of the defaults above.
+Existing config, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
 
 ## macOS
 
@@ -111,6 +112,8 @@ Launch it:
 ```bash
 "/Users/<your-user>/.local/bin/armando"
 ```
+
+Existing config, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
 
 ## Windows
 
