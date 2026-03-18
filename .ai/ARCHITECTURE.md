@@ -21,6 +21,9 @@
 - `src/config.rs`
   Defines the YAML configuration schema, persistence behavior, and config path resolution, including opt-in local history and debug logging.
 
+- `src/prompt_profiles.rs`
+  Loads prompt preset registries from `prompt-tags.yaml` and `generic-prompts.yaml`, merges them with built-in defaults and legacy config aliases, and centralizes explicit language-tag handling.
+
 - `src/history.rs`
   Manages opt-in local history persistence, 7-day retention, selective deletion, and `history.jsonl` lookup.
 
@@ -31,7 +34,7 @@
   Loads external locale files, falls back to English, and discovers available UI languages.
 
 - `src/app_paths.rs`
-  Centralizes application paths for config, themes, locales, and history.
+  Centralizes application paths for config, prompt preset files, themes, locales, and history.
 
 - `src/backends/*`
   Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude, including multimodal image payload mapping and provider-specific available-model discovery.
@@ -54,10 +57,11 @@
 ## Runtime Flow
 
 1. The main process loads the application config
-2. The selected external theme is resolved
-3. The selected UI locale is loaded
-4. The desktop popup UI opens directly
-5. The UI may preload selected text from the OS
+2. Prompt preset registries are loaded and resolved from built-ins plus optional external YAML files
+3. The selected external theme is resolved
+4. The selected UI locale is loaded
+5. The desktop popup UI opens directly
+6. The UI may preload selected text from the OS
 6. The user can enrich the prompt with attached images, clipboard screenshots, or voice dictation
 7. The user can optionally keep the current popup session conversational through an in-memory turn buffer
 8. Voice dictation records to a temporary audio file and sends it to OpenAI transcription before appending text to the prompt
@@ -73,6 +77,7 @@
 18. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
 19. Downloaded release bundles can be installed directly through the bundled platform-specific install scripts
 20. Toolbar SVG textures are regenerated when `egui` reports a different `pixels_per_point` scale so icon rendering stays sharp after DPI changes
+21. Prompt preparation resolves style tags from external preset files and applies language fallback once at the app level instead of repeating that rule inside each preset
 
 ## UI Structure
 
@@ -123,5 +128,6 @@ When history is opened, the window updates `MinInnerSize` and `InnerSize` throug
 
 - Local history is stored in the user data directory, not in the repository
 - Themes and locales are resolved both from the repository and from central user directories
+- Prompt preset files are resolved both from the repository/bundle root and from central user directories
 - On Linux/Wayland, the viewport `app_id` should match the installed `.desktop` entry so launchers and taskbars can resolve the correct application identity and icon
 - Voice dictation relies on `ffmpeg` or `arecord` being available on the system path

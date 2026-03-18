@@ -5,8 +5,9 @@
 - Desktop AI popup that can be launched directly from the operating system
 - Support for `ollama`, `chatgpt`, `gemini`, and `claude` backends
 - Centralized YAML configuration
+- External prompt preset files with built-in defaults, user overrides, and legacy alias fallback
 - Automatic selected-text capture
-- Prompt aliases for contextual workflows
+- Prompt presets and language tags for contextual workflows
 - Copy-to-clipboard for responses
 - Configurable theming system
 - Themes loaded from external YAML files
@@ -19,6 +20,8 @@
 - Settings gear aligned to the right side of the top toolbar
 - Project icon integrated both in the native viewport and in the local desktop installation assets
 - Prompt preparation optimized for cleanup, rewriting, translation, and text adaptation
+- Prompt preparation now loads text-assist presets from `prompt-tags.yaml` and generic presets from `generic-prompts.yaml`
+- Explicit language tags are handled centrally and support a broad set of aliases and full language names
 - UI toggle between text-assist mode and generic-question mode
 - Optional checkbox to keep an in-memory chat session inside the current popup run
 - Optional local history, disabled by default and enabled only on user request
@@ -69,12 +72,16 @@
 - Primary actions use explicit labels to avoid ambiguous buttons
 - Text on accent buttons is configurable through `accent_text_color` in the theme file
 - The large `src/gui.rs` update loop is now split into focused rendering helpers for the main panel, top controls, prompt/response sections, settings, and provider subsections to keep future UI work safer
+- Empty status cards below the prompt are no longer rendered when there is nothing to show
 - Local installation places the binary, shipped themes, shipped locales, desktop icon, and `.desktop` launcher entry in the user profile
+- Local and release installers now preserve existing prompt preset files unless `FORCE_CONFIG_INSTALL=1` is set
 - Downloaded GitHub release bundles now include bundled assets, install scripts, and checksums so other users can extract and install them directly
 - GitHub Actions now validate the Linux flow in Docker before release packaging and upload both test logs and Linux bundle artifacts
 - Default assistant behavior prefers output that can be reapplied immediately
+- In text-assist mode, style/context tags come from external preset files, while language fallback is applied once globally unless an explicit language tag is present
 - In `Generic question` mode, the prompt is treated as a direct question rather than text to rewrite
-- In `Generic question` mode, the `CMD` tag requests only the final command; without `CMD`, the answer is formatted as Markdown
+- In `Generic question` mode, the `CMD` tag requests only the final command; without a command-style preset, the answer is formatted as Markdown
+- Explicit language overrides in either mode accept short aliases such as `EN`, `IT`, `ES`, `FR`, `DE`, `JA` and broader names such as `ENGLISH`, `ITALIAN`, `SPANISH`, `FRENCH`, `GERMAN`, `JAPANESE`, plus additional common language aliases
 - In `Generic question` mode, text-assist aliases and rewrite-oriented prompt expansions are bypassed, even if in-memory chat session mode is enabled
 
 ## Known Gaps

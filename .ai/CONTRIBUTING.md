@@ -33,7 +33,7 @@ bash scripts/pre-release-check.sh
 Run the tagged release gate:
 
 ```bash
-bash scripts/pre-release-check.sh v0.0.2-rc1
+bash scripts/pre-release-check.sh v0.0.2-rc2
 ```
 
 Run the same Linux container validation used by CI:

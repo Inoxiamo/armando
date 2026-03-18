@@ -53,8 +53,9 @@ When the settings panel is open, the footer shows the current app version and, o
 
 ## Prompt Presets
 
-Text-assist tags such as `ITA`, `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are now loaded from `prompt-tags.yaml`.
+Text-assist tags such as `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are loaded from `prompt-tags.yaml`.
 Generic-question presets such as `CMD:` are loaded from `generic-prompts.yaml`.
+Language selection is handled centrally by the app, with support for explicit tags such as `EN`, `ENG`, `ITALIAN`, `ESP`, `FRA`, `DEU`, `JPN`, and many other common aliases.
 
 Both files are read only at startup. The merge order is:
 
@@ -66,9 +67,9 @@ Example `prompt-tags.yaml`:
 
 ```yaml
 tags:
-  ITA: "Traduci o riscrivi il risultato finale in italiano."
-  WORK: "Mantieni un contesto professionale e orientato al lavoro."
-  EMAIL: "Scrivi o riformula il testo come email professionale, chiara e naturale."
+  WORK: "Keep the output professional and work-oriented."
+  EMAIL: "Write or rewrite the text as a professional, clear, and natural email."
+  SHORT: "Keep the final result short and concise."
 ```
 
 Example `generic-prompts.yaml`:
@@ -76,9 +77,11 @@ Example `generic-prompts.yaml`:
 ```yaml
 tags:
   CMD:
-    instruction: "Se la risposta richiesta e un comando o una one-liner da terminale, restituisci solo il comando finale, senza markdown, senza backtick e senza testo aggiuntivo."
+    instruction: "If the requested answer is a shell command or terminal one-liner, return only the final command, with no Markdown, no backticks, and no extra text."
     strip_header: true
 ```
+
+If no explicit language tag is provided, `armando` keeps the language of the source text in text-assist mode and answers in the user's request language in generic-question mode.
 
 The old `aliases` section in the main config is still supported as a legacy fallback, but new presets should go into the dedicated files.
 

@@ -34,6 +34,7 @@
 ## Milestone 0.4 - Productivity Features
 
 - [ ] Session-only history distinct from persistent history
+- [x] External prompt preset files with startup loading and legacy alias fallback
 - [ ] Prompt/snippet templates
 - [x] Optional conversational memory
 - [ ] Active-window context as a hint

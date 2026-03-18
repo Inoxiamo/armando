@@ -23,7 +23,7 @@ The main product focus is helping users clean up, optimize, translate, and adapt
 - Rewrite selected text
 - Translate content quickly
 - Generate a response to paste back into the active application
-- Use prompt aliases for repetitive tasks
+- Use prompt presets and language tags for repetitive tasks
 - Query a local backend without leaving the working environment
 
 ## Non-Goals

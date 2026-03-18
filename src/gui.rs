@@ -1119,9 +1119,13 @@ fn render_main_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::U
                 render_top_controls(app, ctx, ui);
                 ui.add_space(12.0);
                 render_prompt_section(app, ctx, ui);
-                ui.add_space(10.0);
-                render_status_section(app, ui);
-                ui.add_space(16.0);
+                if status_section_has_content(app) {
+                    ui.add_space(10.0);
+                    render_status_section(app, ui);
+                    ui.add_space(16.0);
+                } else {
+                    ui.add_space(12.0);
+                }
                 render_response_section(app, ctx, ui);
 
                 if app.show_history {
@@ -1130,6 +1134,15 @@ fn render_main_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::U
                 }
             });
         });
+}
+
+fn status_section_has_content(app: &AiPopupApp) -> bool {
+    !app.attachments.is_empty()
+        || app.dictation_status.is_some()
+        || app.attachment_notice.is_some()
+        || app.attachment_error.is_some()
+        || app.settings_notice.is_some()
+        || app.settings_error.is_some()
 }
 
 fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -2128,36 +2141,12 @@ fn editor_resize_row(
 
 fn editor_resize_handle(
     ui: &mut egui::Ui,
-    theme: &ResolvedTheme,
-    height: &mut f32,
-    min_height: f32,
-    max_height: f32,
+    _theme: &ResolvedTheme,
+    _height: &mut f32,
+    _min_height: f32,
+    _max_height: f32,
 ) {
-    let handle_height = 14.0;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), handle_height),
-        egui::Sense::click_and_drag(),
-    );
-    let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
-
-    if response.dragged() {
-        *height = (*height + ui.ctx().input(|i| i.pointer.delta().y)).clamp(min_height, max_height);
-        ui.ctx().request_repaint();
-    }
-
-    let stroke_color = if response.hovered() || response.dragged() {
-        theme.accent_color.gamma_multiply(0.75)
-    } else {
-        theme.border_color.gamma_multiply(0.35)
-    };
-    let center_y = rect.center().y;
-    let line_width = 44.0;
-    let line_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, center_y),
-        egui::vec2(line_width, 3.0),
-    );
-    ui.painter()
-        .rect_filled(line_rect, egui::Rounding::same(999.0), stroke_color);
+    ui.add_space(2.0);
 }
 
 fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -> egui::Frame {
@@ -3408,6 +3397,22 @@ fn build_style(theme: &ResolvedTheme) -> egui::Style {
     style.spacing.button_padding = egui::vec2(12.0, 7.0);
     style.spacing.window_margin = egui::Margin::same(12.0);
     style.spacing.indent = 10.0;
+    style.spacing.scroll = egui::style::ScrollStyle {
+        floating: true,
+        bar_width: 8.0,
+        handle_min_length: 24.0,
+        bar_inner_margin: 2.0,
+        bar_outer_margin: 2.0,
+        floating_width: 3.0,
+        floating_allocated_width: 0.0,
+        foreground_color: false,
+        dormant_background_opacity: 0.0,
+        active_background_opacity: 0.0,
+        interact_background_opacity: 0.0,
+        dormant_handle_opacity: 0.10,
+        active_handle_opacity: 0.20,
+        interact_handle_opacity: 0.32,
+    };
     style.visuals.window_rounding = egui::Rounding::same(16.0);
     style.visuals.menu_rounding = egui::Rounding::same(10.0);
     style.visuals.widgets.inactive.rounding = egui::Rounding::same(10.0);

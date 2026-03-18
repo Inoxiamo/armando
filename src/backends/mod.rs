@@ -465,32 +465,64 @@ fn prepare_prompt(
     has_images: bool,
 ) -> String {
     let (expanded_prompt, detected_tags) = match mode {
-        PromptMode::TextAssist => expand_tags(prompt, &prompt_profiles.text_assist_tags),
-        PromptMode::GenericQuestion => {
-            expand_generic_question_prompt(prompt, &prompt_profiles.generic_question_tags)
-        }
+        PromptMode::TextAssist => expand_tags(
+            prompt,
+            &prompt_profiles.text_assist_tags,
+            &prompt_profiles.language_tags,
+        ),
+        PromptMode::GenericQuestion => expand_generic_question_prompt(
+            prompt,
+            &prompt_profiles.generic_question_tags,
+            &prompt_profiles.language_tags,
+        ),
     };
+    let explicit_language = detected_tags
+        .iter()
+        .find_map(|tag| prompt_profiles.language_tags.get(tag))
+        .cloned();
+
     let mut instructions = match mode {
         PromptMode::TextAssist => vec![
-            "Agisci principalmente come assistente di pulizia, ottimizzazione, correzione, traduzione e adattamento del testo.".to_string(),
-            "Tratta l'input dell'utente come testo da sistemare, migliorare, tradurre, accorciare, espandere o rendere piu adatto a un contesto specifico, salvo istruzioni diverse esplicite.".to_string(),
-            "Produci una versione finale pronta da copiare e applicare direttamente nell'applicazione di destinazione.".to_string(),
-            "Mantieni il senso originale del testo, migliorandone chiarezza, tono, grammatica, sintassi e leggibilita.".to_string(),
-            "Se la richiesta implica impostazioni di stile o formato, applicale direttamente nel testo finale senza spiegare cosa hai fatto.".to_string(),
-            "Rispondi solo con il contenuto finale richiesto.".to_string(),
-            "Niente introduzioni, commenti, spiegazioni, premesse o chiusure.".to_string(),
-            "Non usare virgolette o formattazione speciale, a meno che siano richieste esplicitamente.".to_string(),
+            "Act as a text transformation assistant focused on rewriting, improving, correcting, translating, and adapting text.".to_string(),
+            "Treat the user's input as text to transform unless the user explicitly asks for something else.".to_string(),
+            "Produce a final version that is ready to copy and use directly in the target context.".to_string(),
+            "Preserve the original meaning while improving clarity, tone, grammar, syntax, and readability.".to_string(),
+            "Apply style, tone, and formatting instructions directly in the final text without explaining what you changed.".to_string(),
+            "Return only the final requested content.".to_string(),
+            "Do not add introductions, commentary, explanations, or closing remarks.".to_string(),
+            "Do not add quotation marks or special formatting unless explicitly requested.".to_string(),
         ],
         PromptMode::GenericQuestion => vec![
-            "Tratta il testo dell'utente come una domanda o richiesta generica, senza reinterpretarlo come compito di formattazione o pulizia del testo.".to_string(),
-            "Rispondi esattamente alla domanda o richiesta espressa dall'utente.".to_string(),
-            "Mantieni una risposta diretta, utile e senza premesse superflue.".to_string(),
+            "Treat the user's text as a general question or request, not as a text-cleanup task.".to_string(),
+            "Answer the user's request directly and accurately.".to_string(),
+            "Keep the response useful, concise, and free of unnecessary preambles.".to_string(),
         ],
     };
 
+    match mode {
+        PromptMode::TextAssist => {
+            if let Some(language) = explicit_language.as_deref() {
+                instructions.push(format!("Write the final output in {language}."));
+            } else {
+                instructions.push(
+                    "Unless an explicit language tag is provided, keep the final output in the same language as the source text that follows the tags.".to_string(),
+                );
+            }
+        }
+        PromptMode::GenericQuestion => {
+            if let Some(language) = explicit_language.as_deref() {
+                instructions.push(format!("Answer in {language}."));
+            } else {
+                instructions.push(
+                    "Unless an explicit language tag is provided, answer in the same language as the user's request.".to_string(),
+                );
+            }
+        }
+    }
+
     if has_images {
         instructions.push(
-            "Se sono presenti immagini o screenshot allegati, usali come contesto visivo per leggere testo, capire interfacce, estrarre dettagli e migliorare la risposta."
+            "If images or screenshots are attached, use them as visual context to read text, understand interfaces, extract details, and improve the answer."
                 .to_string(),
         );
     }
@@ -504,9 +536,8 @@ fn prepare_prompt(
             .collect::<Vec<_>>();
 
         if generic_tag_instructions.is_empty() {
-            instructions.push(
-                "Formatta la risposta in Markdown chiaro e leggibile quando utile.".to_string(),
-            );
+            instructions
+                .push("Use clear Markdown formatting when it helps readability.".to_string());
         } else {
             instructions.extend(generic_tag_instructions);
         }
@@ -514,13 +545,13 @@ fn prepare_prompt(
 
     if !detected_tags.is_empty() {
         instructions.push(format!(
-            "Applica automaticamente queste istruzioni di contesto: {}.",
+            "Automatically apply these context instructions: {}.",
             detected_tags.join(", ")
         ));
     }
 
     let effective_prompt = if expanded_prompt.trim().is_empty() && has_images {
-        "Analizza gli allegati immagine o screenshot e rispondi in modo utile, diretto e concreto."
+        "Analyze the attached images or screenshots and respond in a useful, direct, and concrete way."
             .to_string()
     } else {
         expanded_prompt.trim().to_string()
@@ -538,7 +569,7 @@ fn prepare_prompt(
             .rev()
             .map(|turn| {
                 format!(
-                    "Utente:\n{}\n\nAssistente:\n{}",
+                    "User:\n{}\n\nAssistant:\n{}",
                     turn.user_prompt.trim(),
                     turn.assistant_response.trim()
                 )
@@ -546,12 +577,12 @@ fn prepare_prompt(
             .collect::<Vec<_>>()
             .join("\n\n---\n\n");
         format!(
-            "\n\nContesto conversazione corrente:\nUsa questi turni precedenti solo come contesto della conversazione in corso. Non reinterpretare automaticamente la nuova richiesta come compito di pulizia o trasformazione del testo, a meno che l'utente lo chieda esplicitamente.\n\n{turns}"
+            "\n\nCurrent conversation context:\nUse these previous turns only as context for the ongoing conversation. Do not automatically reinterpret the new request as a text cleanup or transformation task unless the user explicitly asks for that.\n\n{turns}"
         )
     };
 
     format!(
-        "{}{}\n\nRichiesta utente:\n{effective_prompt}",
+        "{}{}\n\nUser request:\n{effective_prompt}",
         instructions.join("\n"),
         conversation_block,
     )
@@ -560,6 +591,7 @@ fn prepare_prompt(
 fn expand_generic_question_prompt(
     prompt: &str,
     generic_tags: &std::collections::HashMap<String, crate::prompt_profiles::GenericPromptTag>,
+    language_tags: &std::collections::HashMap<String, String>,
 ) -> (String, Vec<String>) {
     let Some(colon_idx) = prompt.find(':') else {
         return (prompt.trim().to_string(), Vec::new());
@@ -567,22 +599,33 @@ fn expand_generic_question_prompt(
 
     let header = prompt[..colon_idx].trim();
     let body = prompt[colon_idx + 1..].trim_start();
-    let normalized = normalize_tag(header);
-    if let Some(tag) = generic_tags.get(&normalized) {
-        let effective_prompt = if tag.strip_header && !body.is_empty() {
-            body.trim().to_string()
-        } else {
-            prompt.trim().to_string()
-        };
-        return (effective_prompt, vec![normalized]);
+    let tags = parse_known_tags(header, |tag| {
+        generic_tags.contains_key(tag) || language_tags.contains_key(tag)
+    });
+    if tags.is_empty() {
+        return (prompt.trim().to_string(), Vec::new());
     }
 
-    (prompt.trim().to_string(), Vec::new())
+    let should_strip_header = !body.is_empty()
+        && tags.iter().any(|tag| {
+            generic_tags
+                .get(tag)
+                .is_some_and(|tag_config| tag_config.strip_header)
+                || language_tags.contains_key(tag)
+        });
+    let effective_prompt = if should_strip_header {
+        body.trim().to_string()
+    } else {
+        prompt.trim().to_string()
+    };
+
+    (effective_prompt, tags)
 }
 
 fn expand_tags(
     prompt: &str,
     text_assist_tags: &std::collections::HashMap<String, String>,
+    language_tags: &std::collections::HashMap<String, String>,
 ) -> (String, Vec<String>) {
     let Some(colon_idx) = prompt.find(':') else {
         return (prompt.to_string(), Vec::new());
@@ -594,35 +637,42 @@ fn expand_tags(
         return (prompt.to_string(), Vec::new());
     }
 
-    let tags = parse_header_tags(header, text_assist_tags);
+    let tags = parse_header_tags(header, text_assist_tags, language_tags);
     if tags.is_empty() {
         return (prompt.to_string(), Vec::new());
     }
 
     let mut instructions = Vec::new();
-    let mut applied_tags = Vec::new();
 
-    for tag in tags {
-        if let Some(custom) = text_assist_tags.get(&tag) {
+    for tag in &tags {
+        if let Some(custom) = text_assist_tags.get(tag) {
             instructions.push(custom.trim().to_string());
-            applied_tags.push(tag);
         }
     }
 
-    if instructions.is_empty() {
-        return (prompt.to_string(), Vec::new());
-    }
+    let expanded = if instructions.is_empty() {
+        body.to_string()
+    } else {
+        format!("{}\n\n{body}", instructions.join("\n"))
+    };
 
-    (
-        format!("{}\n\n{body}", instructions.join("\n")),
-        applied_tags,
-    )
+    (expanded, tags)
 }
 
 fn parse_header_tags(
     header: &str,
     text_assist_tags: &std::collections::HashMap<String, String>,
+    language_tags: &std::collections::HashMap<String, String>,
 ) -> Vec<String> {
+    parse_known_tags(header, |tag| {
+        text_assist_tags.contains_key(tag) || language_tags.contains_key(tag)
+    })
+}
+
+fn parse_known_tags<F>(header: &str, is_known: F) -> Vec<String>
+where
+    F: Fn(&str) -> bool,
+{
     let tags: Vec<String> = header
         .split(|c: char| c.is_whitespace() || matches!(c, '-' | '+' | ',' | '/' | '|'))
         .filter_map(|part| {
@@ -641,7 +691,7 @@ fn parse_header_tags(
         })
         .collect();
 
-    let all_known = tags.iter().all(|tag| text_assist_tags.contains_key(tag));
+    let all_known = tags.iter().all(|tag| is_known(tag));
 
     if all_known {
         tags
@@ -709,9 +759,10 @@ mod tests {
             false,
         );
 
-        assert!(prompt.contains("Agisci principalmente come assistente di pulizia"));
-        assert!(prompt.contains("Richiesta utente:\nsistema questo testo"));
-        assert!(!prompt.contains("Formatta la risposta in Markdown"));
+        assert!(prompt.contains("Act as a text transformation assistant"));
+        assert!(prompt.contains("User request:\nsistema questo testo"));
+        assert!(prompt.contains("keep the final output in the same language as the source text"));
+        assert!(!prompt.contains("Use clear Markdown formatting"));
     }
 
     #[test]
@@ -724,11 +775,10 @@ mod tests {
             false,
         );
 
-        assert!(
-            prompt.contains("Tratta il testo dell'utente come una domanda o richiesta generica")
-        );
-        assert!(prompt.contains("Formatta la risposta in Markdown chiaro e leggibile"));
-        assert!(!prompt.contains("solo il comando finale"));
+        assert!(prompt.contains("Treat the user's text as a general question or request"));
+        assert!(prompt.contains("Use clear Markdown formatting when it helps readability."));
+        assert!(prompt.contains("answer in the same language as the user's request"));
+        assert!(!prompt.contains("return only the final command"));
     }
 
     #[test]
@@ -741,10 +791,10 @@ mod tests {
             false,
         );
 
-        assert!(prompt.contains("solo il comando finale"));
-        assert!(!prompt.contains("Formatta la risposta in Markdown chiaro e leggibile"));
-        assert!(prompt.contains("Applica automaticamente queste istruzioni di contesto: CMD."));
-        assert!(prompt.contains("Richiesta utente:\ndammi il comando per vedere i processi"));
+        assert!(prompt.contains("return only the final command"));
+        assert!(!prompt.contains("Use clear Markdown formatting when it helps readability."));
+        assert!(prompt.contains("Automatically apply these context instructions: CMD."));
+        assert!(prompt.contains("User request:\ndammi il comando per vedere i processi"));
     }
 
     #[test]
@@ -758,19 +808,21 @@ mod tests {
         );
 
         assert!(!prompt.contains("Trasforma il testo in un titolo breve."));
-        assert!(!prompt.contains("Applica automaticamente queste istruzioni di contesto"));
-        assert!(prompt.contains("Richiesta utente:\nTITLE: armando popup ai"));
+        assert!(!prompt.contains("Automatically apply these context instructions"));
+        assert!(prompt.contains("User request:\nTITLE: armando popup ai"));
     }
 
     #[test]
     fn expand_tags_applies_builtin_and_custom_aliases() {
         let profiles = test_profiles();
-        let (expanded, tags) = expand_tags("CMD TITLE: hello world", &profiles.text_assist_tags);
+        let (expanded, tags) = expand_tags(
+            "CMD TITLE: hello world",
+            &profiles.text_assist_tags,
+            &profiles.language_tags,
+        );
 
         assert_eq!(tags, vec!["CMD".to_string(), "TITLE".to_string()]);
-        assert!(
-            expanded.contains("La risposta finale deve essere orientata a un comando eseguibile.")
-        );
+        assert!(expanded.contains("Shape the final output as an executable command"));
         assert!(expanded.contains("Trasforma il testo in un titolo breve."));
         assert!(expanded.ends_with("hello world"));
     }
@@ -778,7 +830,11 @@ mod tests {
     #[test]
     fn unknown_tags_disable_header_expansion() {
         let profiles = test_profiles();
-        let (expanded, tags) = expand_tags("NOPE: hello world", &profiles.text_assist_tags);
+        let (expanded, tags) = expand_tags(
+            "NOPE: hello world",
+            &profiles.text_assist_tags,
+            &profiles.language_tags,
+        );
 
         assert!(tags.is_empty());
         assert_eq!(expanded, "NOPE: hello world");
@@ -787,8 +843,86 @@ mod tests {
     #[test]
     fn parse_header_tags_accepts_cmd() {
         let profiles = test_profiles();
-        let tags = parse_header_tags("CMD SHORT", &profiles.text_assist_tags);
+        let tags = parse_header_tags(
+            "CMD SHORT",
+            &profiles.text_assist_tags,
+            &profiles.language_tags,
+        );
         assert_eq!(tags, vec!["CMD".to_string(), "SHORT".to_string()]);
+    }
+
+    #[test]
+    fn parse_header_tags_accepts_language_aliases() {
+        let profiles = test_profiles();
+        let tags = parse_header_tags(
+            "WORK ESP",
+            &profiles.text_assist_tags,
+            &profiles.language_tags,
+        );
+        assert_eq!(tags, vec!["WORK".to_string(), "ESP".to_string()]);
+    }
+
+    #[test]
+    fn text_assist_language_tag_forces_requested_language_once() {
+        let profiles = test_profiles();
+        let prompt = prepare_prompt(
+            "WORK FRA: please rewrite this for a customer update",
+            &[],
+            &profiles,
+            PromptMode::TextAssist,
+            false,
+        );
+
+        assert!(prompt.contains("Write the final output in French."));
+        assert!(!prompt.contains("keep the final output in the same language as the source text"));
+        assert!(prompt.contains("Keep the output professional and work-oriented."));
+        assert!(prompt.contains("please rewrite this for a customer update"));
+    }
+
+    #[test]
+    fn generic_question_language_tag_forces_requested_language() {
+        let profiles = test_profiles();
+        let prompt = prepare_prompt(
+            "DEU: explain what docker compose does",
+            &[],
+            &profiles,
+            PromptMode::GenericQuestion,
+            false,
+        );
+
+        assert!(prompt.contains("Answer in German."));
+        assert!(!prompt.contains("answer in the same language as the user's request"));
+        assert!(prompt.contains("User request:\nexplain what docker compose does"));
+    }
+
+    #[test]
+    fn generic_question_accepts_full_language_name_tags() {
+        let profiles = test_profiles();
+        let prompt = prepare_prompt(
+            "PORTUGUESE: explain what docker compose does",
+            &[],
+            &profiles,
+            PromptMode::GenericQuestion,
+            false,
+        );
+
+        assert!(prompt.contains("Answer in Portuguese."));
+        assert!(prompt.contains("User request:\nexplain what docker compose does"));
+    }
+
+    #[test]
+    fn text_assist_accepts_short_language_aliases() {
+        let profiles = test_profiles();
+        let prompt = prepare_prompt(
+            "WORK VI: rewrite this update for the team",
+            &[],
+            &profiles,
+            PromptMode::TextAssist,
+            false,
+        );
+
+        assert!(prompt.contains("Write the final output in Vietnamese."));
+        assert!(prompt.contains("Keep the output professional and work-oriented."));
     }
 
     #[test]
@@ -811,8 +945,8 @@ mod tests {
         );
 
         assert!(prompt.contains("Rispondi solo con SQL valido."));
-        assert!(prompt.contains("Richiesta utente:\nelenco utenti ordinati per nome"));
-        assert!(!prompt.contains("Formatta la risposta in Markdown chiaro e leggibile"));
+        assert!(prompt.contains("User request:\nelenco utenti ordinati per nome"));
+        assert!(!prompt.contains("Use clear Markdown formatting when it helps readability."));
     }
 
     #[test]
@@ -828,11 +962,11 @@ mod tests {
             false,
         );
 
-        assert!(prompt.contains("Contesto conversazione corrente"));
-        assert!(prompt.contains("Utente:\ncome stai?"));
-        assert!(prompt.contains("Assistente:\nbene"));
-        assert!(prompt.contains(
-            "Non reinterpretare automaticamente la nuova richiesta come compito di pulizia"
-        ));
+        assert!(prompt.contains("Current conversation context"));
+        assert!(prompt.contains("User:\ncome stai?"));
+        assert!(prompt.contains("Assistant:\nbene"));
+        assert!(
+            prompt.contains("Do not automatically reinterpret the new request as a text cleanup")
+        );
     }
 }
