@@ -1,4 +1,4 @@
-Documento legacy in formato .doc (testuale semplificato).
+Legacy document in .doc format (simplified text).
 
-Questo file verifica il fallback di estrazione per estensione .doc.
-Contiene parole chiave: coseno, embedding, chunk_size, max_retrieved_docs.
+This file verifies extraction fallback for the .doc extension.
+It contains keywords: cosine, embedding, chunk_size, max_retrieved_docs.

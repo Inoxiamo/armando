@@ -1,10 +1,10 @@
 # Armando RAG Test Corpus
 
-Questo documento serve per testare il retrieval.
+This document is used to test retrieval.
 
-- Il progetto usa Rust + egui.
-- La funzionalita RAG deve recuperare contesto tecnico.
-- Keyword target: `window_context`, `prompt_profiles`, `history.jsonl`.
+- The project uses Rust + egui.
+- The RAG feature must retrieve technical context.
+- Target keywords: `window_context`, `prompt_profiles`, `history.jsonl`.
 
-Frase firma per ranking:
-"La migliore strategia e indicizzare i documenti prima del runtime."
+Signature sentence for ranking:
+"The best strategy is to index documents before runtime."

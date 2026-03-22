@@ -14,18 +14,18 @@ logging:
 update:
   beta: false
 rag:
-  enabled: false
+  enabled: true
   mode: vector
-  runtime_override: default
-  documents_folder: null
+  runtime_override: force_on
+  documents_folder: /home/simone/work/test-popup-ai/.test-doc-rag
   vector_db_path: .armando-rag.sqlite3
-  max_retrieved_docs: 4
-  chunk_size: 1200
-  embedding_backend: null
-  embedding_model: null
+  max_retrieved_docs: 3
+  chunk_size: 700
+  embedding_backend: ollama
+  embedding_model: nomic-embed-text
 gemini:
-  api_key: YOUR_GEMINI_API_KEY
-  model: gemini-1.5-flash
+  api_key: AIzaSyCeV_jj7lG77hpnfT5q-YtLcNsh2dnQy6I
+  model: gemini-2.5-flash
 chatgpt:
   api_key: YOUR_OPENAI_API_KEY
   model: gpt-4o-mini

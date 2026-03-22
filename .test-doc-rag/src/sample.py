@@ -1,8 +1,8 @@
 def rag_runtime_override_examples():
-    """Snippet di esempio per retrieval."""
+    """Example snippet for retrieval."""
     cases = [
-        "!rag on spiegami come funziona il vector db",
-        "!rag off rispondi senza retrieval",
+        "!rag on explain how the vector DB works",
+        "!rag off answer without retrieval",
     ]
     return cases
 

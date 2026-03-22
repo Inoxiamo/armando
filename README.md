@@ -99,8 +99,8 @@ rag:
   vector_db_path: ".armando-rag.sqlite3"
   max_retrieved_docs: 4
   chunk_size: 1200
-  embedding_backend: "gemini" # optional, for vector/hybrid
-  embedding_model: "gemini-embedding-001" # optional, for vector/hybrid
+  embedding_backend: "ollama" # optional, for vector/hybrid
+  embedding_model: "nomic-embed-text" # optional, for vector/hybrid
 ```
 
 When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
@@ -133,8 +133,23 @@ When the settings panel is open, the footer shows the current app version and, o
 - `hybrid`: combines lexical + vector scores.
 
 When vector scoring is active, `rag.embedding_backend` and `rag.embedding_model` let you decouple embedding from the currently selected query backend/model.
-If `rag.embedding_backend` is not set, embedding falls back to `ollama` by default.
+If `rag.embedding_backend` is not set, embeddings follow the selected query backend (or `default_backend` if needed).
 Runtime prompt overrides are available with `!rag on` and `!rag off`.
+
+### Ollama Recommendation For RAG
+
+For local RAG, use a dedicated embedding model instead of reusing the chat model.
+
+- Suggested RAG embedding backend/model:
+  - `rag.embedding_backend: ollama`
+  - `rag.embedding_model: nomic-embed-text`
+- Suggested Ollama chat model can stay separate in `ollama.model` (for example `gemma3:1b`, `llama3`, etc.).
+
+Download the dedicated embedding model once:
+
+```bash
+ollama pull nomic-embed-text
+```
 
 ### Gemini: Query vs Embedding Model Mismatch
 
