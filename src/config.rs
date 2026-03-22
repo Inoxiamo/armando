@@ -98,6 +98,25 @@ pub struct Config {
     pub loaded_from: Option<PathBuf>,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            aliases: None,
+            auto_read_selection: default_auto_read_selection(),
+            default_backend: default_backend(),
+            theme: ThemeConfig::default(),
+            ui: UiConfig::default(),
+            history: HistoryConfig::default(),
+            logging: LoggingConfig::default(),
+            gemini: None,
+            chatgpt: None,
+            claude: None,
+            ollama: None,
+            loaded_from: None,
+        }
+    }
+}
+
 fn default_auto_read_selection() -> bool {
     true
 }
@@ -115,7 +134,7 @@ fn default_language() -> String {
 }
 
 fn default_window_height() -> f32 {
-    640.0
+    600.0
 }
 
 impl Config {
@@ -130,9 +149,29 @@ impl Config {
             }
         }
 
-        anyhow::bail!(
-            "No configuration file found. Expected `configs/default.yaml` or legacy `config.yaml` in the standard application locations."
-        );
+        if let Some(template_path) = app_paths::bundled_default_config_template_path()? {
+            log::warn!(
+                "No config file found, falling back to bundled defaults from {}",
+                template_path.display()
+            );
+
+            match std::fs::read_to_string(&template_path)
+                .ok()
+                .and_then(|content| serde_yaml::from_str::<Self>(&content).ok())
+            {
+                Some(config) => return Ok(config),
+                None => {
+                    log::warn!(
+                        "Bundled default config at {} could not be loaded, falling back to built-in defaults",
+                        template_path.display()
+                    );
+                }
+            }
+        } else {
+            log::warn!("No config file found and no bundled defaults were available");
+        }
+
+        Ok(Self::default())
     }
 
     pub fn save(&mut self) -> anyhow::Result<()> {
@@ -151,6 +190,17 @@ impl Config {
         std::fs::write(&path, content)?;
         self.loaded_from = Some(path);
         Ok(())
+    }
+
+    pub fn load_template(template_name: &str) -> anyhow::Result<Option<Self>> {
+        let Some(path) = app_paths::bundled_config_template_path(template_name)? else {
+            return Ok(None);
+        };
+
+        let content = std::fs::read_to_string(&path)?;
+        let mut config: Self = serde_yaml::from_str(&content)?;
+        config.loaded_from = Some(path);
+        Ok(Some(config))
     }
 }
 
@@ -182,8 +232,14 @@ mod tests {
         assert!(config.auto_read_selection);
         assert_eq!(config.theme.name, "default-dark");
         assert_eq!(config.ui.language, "en");
-        assert_eq!(config.ui.window_height, 640.0);
+        assert_eq!(config.ui.window_height, 600.0);
         assert!(!config.history.enabled);
         assert!(!config.logging.enabled);
+    }
+
+    #[test]
+    fn load_template_returns_none_when_template_is_missing() {
+        let template = Config::load_template("missing-template").unwrap();
+        assert!(template.is_none());
     }
 }

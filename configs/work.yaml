@@ -1,4 +1,3 @@
-aliases: null
 auto_read_selection: true
 default_backend: chatgpt
 theme:
@@ -8,7 +7,7 @@ ui:
   language: en
   window_height: 640.0
 history:
-  enabled: false
+  enabled: true
 logging:
   enabled: false
 gemini:
@@ -22,4 +21,4 @@ claude:
   model: claude-3-5-sonnet-latest
 ollama:
   base_url: http://localhost:11434
-  model: gemma3:latest
+  model: gemma3:1b

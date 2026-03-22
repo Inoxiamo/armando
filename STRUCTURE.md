@@ -6,22 +6,24 @@ This page is a quick map of the repository.
 
 - `src/`: Rust application code
 - `assets/`: icons and desktop integration assets
-- `configs/`: default configuration templates
+- `configs/`: default configuration templates and reusable first-run profiles
 - `themes/`: shipped theme presets
 - `locales/`: shipped UI translations
 - `scripts/`: local install, packaging, validation, and release helpers
 - `tests/`: integration and functional tests
+- `docs/media/`: screenshots used by the public documentation
 - `docker/`: Docker image used for CI and local container validation
 - `.github/workflows/`: CI, release, and static analysis automation
 - `.ai/`: internal product, architecture, roadmap, and contributor notes
+- `VISUAL_REGRESSION.md`: repeatable layout and visual verification checklist
 
 ## Application Modules
 
 - `src/main.rs`: native app entry point
 - `src/lib.rs`: shared library exports for tests and app modules
 - `src/gui.rs`: UI flow, settings, history, prompt handling, clipboard behavior, and version display
-- `src/config.rs`: YAML config schema and persistence
-- `src/app_paths.rs`: config, data, history, and log path resolution
+- `src/config.rs`: YAML config schema, persistence, and template loading
+- `src/app_paths.rs`: config, data, history, log, and template path resolution
 - `src/history.rs`: local history persistence and retention
 - `src/theme.rs`: theme loading and discovery
 - `src/i18n.rs`: locale loading and discovery
@@ -49,5 +51,7 @@ This page is a quick map of the repository.
 - Installation guide: [`INSTALL.md`](INSTALL.md)
 - Shortcut guide: [`SHORTCUTS.md`](SHORTCUTS.md)
 - Release guide: [`RELEASES.md`](RELEASES.md)
+- Visual regression checklist: [`VISUAL_REGRESSION.md`](VISUAL_REGRESSION.md)
+- Documentation media index: [`docs/media/README.md`](docs/media/README.md)
 
 Internal docs are intentionally kept under `.ai/` and are not linked from the public `README`.

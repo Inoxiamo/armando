@@ -3,6 +3,21 @@ use serde::Deserialize;
 pub const GITHUB_RELEASES_LATEST_URL: &str = "https://github.com/Inoxiamo/armando/releases/latest";
 pub const GITHUB_RELEASES_API_URL: &str =
     "https://api.github.com/repos/Inoxiamo/armando/releases/latest";
+pub const GITHUB_BOOTSTRAP_SCRIPT_URL: &str =
+    "https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateAction {
+    CopyCommand { command: String },
+    OpenReleasePage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateGuide {
+    pub platform_label: String,
+    pub detail: String,
+    pub action: UpdateAction,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseInfo {
@@ -49,6 +64,39 @@ pub fn update_available(current_version: &str, latest_version: &str) -> bool {
     };
 
     latest > current
+}
+
+pub fn current_platform_update_guide() -> UpdateGuide {
+    platform_update_guide_for(std::env::consts::OS)
+}
+
+fn platform_update_guide_for(target_os: &str) -> UpdateGuide {
+    match target_os {
+        "linux" => UpdateGuide {
+            platform_label: "Linux".to_string(),
+            detail: "Use the bootstrap installer to download the latest bundle and run the bundled installer.".to_string(),
+            action: UpdateAction::CopyCommand {
+                command: format!("curl -fsSL {GITHUB_BOOTSTRAP_SCRIPT_URL} | bash"),
+            },
+        },
+        "macos" => UpdateGuide {
+            platform_label: "macOS".to_string(),
+            detail: "Use the bootstrap installer to download the latest bundle and run the bundled installer.".to_string(),
+            action: UpdateAction::CopyCommand {
+                command: format!("curl -fsSL {GITHUB_BOOTSTRAP_SCRIPT_URL} | bash"),
+            },
+        },
+        "windows" => UpdateGuide {
+            platform_label: "Windows".to_string(),
+            detail: "Download the latest .zip release, extract it, then run scripts\\install.ps1 from PowerShell.".to_string(),
+            action: UpdateAction::OpenReleasePage,
+        },
+        _ => UpdateGuide {
+            platform_label: target_os.to_string(),
+            detail: "Open the latest release page and follow the packaged install instructions for your platform.".to_string(),
+            action: UpdateAction::OpenReleasePage,
+        },
+    }
 }
 
 fn parse_version(version: &str) -> Option<ParsedVersion> {
@@ -238,5 +286,32 @@ mod tests {
     fn returns_false_for_invalid_versions() {
         assert!(!update_available("dev-build", "0.0.3"));
         assert!(!update_available("0.0.2", "latest"));
+    }
+
+    #[test]
+    fn linux_update_guide_prefers_bootstrap_command() {
+        let guide = platform_update_guide_for("linux");
+        assert_eq!(guide.platform_label, "Linux");
+        assert!(guide.detail.contains("bootstrap"));
+        match guide.action {
+            UpdateAction::CopyCommand { command } => {
+                assert!(command.contains(GITHUB_BOOTSTRAP_SCRIPT_URL));
+            }
+            UpdateAction::OpenReleasePage => panic!("linux should prefer a copyable command"),
+        }
+    }
+
+    #[test]
+    fn exposes_bootstrap_script_url() {
+        assert!(GITHUB_BOOTSTRAP_SCRIPT_URL.starts_with("https://"));
+        assert!(GITHUB_BOOTSTRAP_SCRIPT_URL.ends_with("bootstrap-release.sh"));
+    }
+
+    #[test]
+    fn windows_update_guide_prefers_release_page() {
+        let guide = platform_update_guide_for("windows");
+        assert_eq!(guide.platform_label, "Windows");
+        assert!(guide.detail.contains("install.ps1"));
+        assert!(matches!(guide.action, UpdateAction::OpenReleasePage));
     }
 }

@@ -6,7 +6,7 @@ This page explains how `armando` versions, tags, and release artifacts are organ
 
 - the application version lives in [`Cargo.toml`](Cargo.toml)
 - the Git tag format is `v<version>`
-- example: crate version `0.0.2-rc1` maps to tag `v0.0.2-rc1`
+- example: crate version `0.0.2-rc3` maps to tag `v0.0.2-rc3`
 
 ## Downloading A Release
 
@@ -16,14 +16,24 @@ This page explains how `armando` versions, tags, and release artifacts are organ
 Use `latest` if you just want the newest published version.
 Use the full releases page if you need a specific stable build, prerelease, or older artifact.
 The desktop app also checks the latest GitHub release in-app and compares it with the local version from `Cargo.toml`.
+When an update is available, the settings footer offers both the direct release page and, on Linux or macOS, a guided bootstrap command.
+When an update is available, the settings footer also surfaces a guided next step for the current platform: a copyable bootstrap command on Linux/macOS or a release-page shortcut on Windows.
+
+Linux and macOS users can also use the guided bootstrap wrapper from the repository:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh | bash
+```
+
+Pass a version as the first argument or set `ARMANDO_INSTALL_VERSION=<version>` before invoking it if you want a specific tag instead of `latest`.
 
 ## Release Flow
 
 Typical flow:
 
 ```bash
-git commit -am "release: prepare v0.0.2-rc1"
-git tag v0.0.2-rc1
+git commit -am "release: prepare v0.0.2-rc3"
+git tag v0.0.2-rc3
 git push origin master --tags
 ```
 
@@ -54,6 +64,9 @@ Each release bundle includes:
 - install script
 - checksum file
 
+The bootstrap wrapper does not replace these installers. It only selects the correct artifact, downloads it, optionally verifies the checksum, extracts it, and delegates to the bundled installer.
+For Windows, the release page remains the manual download path and the included `install.ps1` script remains the recommended installer entrypoint.
+
 ## Pre-Release Validation
 
 Before publishing a version, the repository can validate:
@@ -70,7 +83,7 @@ Before publishing a version, the repository can validate:
 Local command:
 
 ```bash
-bash scripts/pre-release-check.sh v0.0.2-rc1
+bash scripts/pre-release-check.sh v0.0.2-rc3
 ```
 
 Optional local Sonar smoke test:

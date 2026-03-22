@@ -13,13 +13,29 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
         ));
     };
 
+    query_at(
+        "https://api.openai.com/v1/responses",
+        prompt,
+        images,
+        &api_key,
+        &model,
+    )
+    .await
+}
+
+pub(crate) async fn query_at(
+    url: &str,
+    prompt: &str,
+    images: &[ImageAttachment],
+    api_key: &str,
+    model: &str,
+) -> Result<String> {
     if api_key.is_empty() || api_key == "YOUR_OPENAI_API_KEY" {
         return Err(anyhow!(
             "⚠️ OpenAI API key not configured. Edit config.yaml and set chatgpt.api_key."
         ));
     }
 
-    let url = "https://api.openai.com/v1/responses";
     let mut content = vec![json!({
         "type": "input_text",
         "text": prompt
@@ -51,39 +67,11 @@ pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) ->
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
-        let parsed = serde_json::from_str::<serde_json::Value>(&text).ok();
-        let message = parsed
-            .as_ref()
-            .and_then(|value| value.get("error"))
-            .and_then(|error| error.get("message"))
-            .and_then(|message| message.as_str())
-            .unwrap_or(text.trim());
-
-        if status.as_u16() == 429
-            && (message.to_lowercase().contains("quota")
-                || message.to_lowercase().contains("billing")
-                || message.to_lowercase().contains("rate limit"))
-        {
-            return Err(anyhow!(
-                "Quota OpenAI esaurita o billing non attivo. Il modello configurato e `{model}`. Verifica piano, crediti e fatturazione del progetto API, poi riprova. Dettaglio API: {message}"
-            ));
-        }
-
-        return Err(anyhow!(
-            "ChatGPT API error (HTTP {status}): modello `{model}`. {message}"
-        ));
+        return Err(anyhow!(openai_error_message(status, &text, model)));
     }
 
     let result: serde_json::Value = response.json().await?;
-    if let Some(text) = result.get("output_text").and_then(|value| value.as_str()) {
-        return Ok(text.to_string());
-    }
-
-    let content = result["output"][0]["content"][0]["text"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Unexpected ChatGPT API response structure"))?;
-
-    Ok(content.to_string())
+    openai_response_text(&result)
 }
 
 pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result<String> {
@@ -95,6 +83,19 @@ pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result
         ));
     };
 
+    transcribe_wav_audio_at(
+        "https://api.openai.com/v1/audio/transcriptions",
+        wav_bytes,
+        &api_key,
+    )
+    .await
+}
+
+pub(crate) async fn transcribe_wav_audio_at(
+    url: &str,
+    wav_bytes: Vec<u8>,
+    api_key: &str,
+) -> Result<String> {
     if api_key.is_empty() || api_key == "YOUR_OPENAI_API_KEY" {
         return Err(anyhow!(
             "⚠️ OpenAI API key not configured. Configure it to use voice dictation."
@@ -114,7 +115,7 @@ pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result
         .part("file", part);
 
     let response = client
-        .post("https://api.openai.com/v1/audio/transcriptions")
+        .post(url)
         .bearer_auth(api_key)
         .multipart(form)
         .send()
@@ -129,4 +130,38 @@ pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result
     }
 
     Ok(response.text().await?.trim().to_string())
+}
+
+pub(crate) fn openai_error_message(status: reqwest::StatusCode, body: &str, model: &str) -> String {
+    let parsed = serde_json::from_str::<serde_json::Value>(body).ok();
+    let message = parsed
+        .as_ref()
+        .and_then(|value| value.get("error"))
+        .and_then(|error| error.get("message"))
+        .and_then(|message| message.as_str())
+        .unwrap_or(body.trim());
+
+    if status.as_u16() == 429
+        && (message.to_lowercase().contains("quota")
+            || message.to_lowercase().contains("billing")
+            || message.to_lowercase().contains("rate limit"))
+    {
+        return format!(
+            "Quota OpenAI esaurita o billing non attivo. Il modello configurato e `{model}`. Verifica piano, crediti e fatturazione del progetto API, poi riprova. Dettaglio API: {message}"
+        );
+    }
+
+    format!("ChatGPT API error (HTTP {status}): modello `{model}`. {message}")
+}
+
+pub(crate) fn openai_response_text(result: &serde_json::Value) -> Result<String> {
+    if let Some(text) = result.get("output_text").and_then(|value| value.as_str()) {
+        return Ok(text.to_string());
+    }
+
+    let content = result["output"][0]["content"][0]["text"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Unexpected ChatGPT API response structure"))?;
+
+    Ok(content.to_string())
 }

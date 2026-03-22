@@ -8,3 +8,4 @@ pub mod logging;
 pub mod prompt_profiles;
 pub mod theme;
 pub mod update;
+pub mod window_context;

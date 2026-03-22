@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.0.2-rc3 - 2026-03-22
+
+- added startup diagnostics, first-run profile setup, and reusable bundled config templates
+- added guided bootstrap install/update support for Linux and macOS, with platform-aware update actions in the app
+- expanded prompt preset handling, active-window context hints, and configuration/profile coverage
+- improved documentation, media previews, release notes alignment, and validation guidance
+- strengthened integration, packaging, and regression coverage for the current release flow
+
 ## v0.0.2-rc2 - 2026-03-18
 
 - added in-app GitHub update checking with version comparison and a direct latest-release shortcut from settings

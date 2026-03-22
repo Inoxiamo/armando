@@ -4,6 +4,11 @@ use std::process::Command;
 
 mod support;
 
+fn write_executable_script(path: &std::path::Path, contents: &str) {
+    std::fs::write(path, contents).unwrap();
+    support::make_executable(path);
+}
+
 fn package_version() -> String {
     format!("itest-{}", std::process::id())
 }
@@ -16,6 +21,44 @@ fn package_archive(version: &str) -> std::path::PathBuf {
     support::repo_root()
         .join("target/dist")
         .join(format!("{}.tar.gz", package_archive_name(version)))
+}
+
+fn bootstrap_release_dry_run_output(os: &str, arch: &str) -> String {
+    let _guard = support::test_lock();
+    let temp_dir = support::unique_temp_dir("bootstrap-dry-run");
+    let fake_bin_dir = temp_dir.join("fake-bin");
+    std::fs::create_dir_all(&fake_bin_dir).unwrap();
+
+    write_executable_script(
+        &fake_bin_dir.join("uname"),
+        &format!(
+            "#!/usr/bin/env bash\ncase \"$1\" in\n  -s) echo {os} ;;\n  -m) echo {arch} ;;\n  *) exit 1 ;;\nesac\n"
+        ),
+    );
+    write_executable_script(&fake_bin_dir.join("curl"), "#!/usr/bin/env bash\nexit 0\n");
+
+    let path = format!(
+        "{}:{}",
+        fake_bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = Command::new("bash")
+        .arg("scripts/bootstrap-release.sh")
+        .arg("1.2.3")
+        .current_dir(support::repo_root())
+        .env("ARMANDO_INSTALL_DRY_RUN", "1")
+        .env("PATH", path)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "bootstrap dry run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout).unwrap()
 }
 
 #[test]
@@ -71,6 +114,19 @@ fn package_release_bundle_contains_runtime_assets() {
 
     let _ = std::fs::remove_file(&archive_path);
     support::remove_dir_all_if_exists(&temp_dir);
+}
+
+#[test]
+fn bootstrap_release_dry_run_reports_linux_and_macos_targets() {
+    let linux_output = bootstrap_release_dry_run_output("Linux", "x86_64");
+    assert!(linux_output.contains("x86_64-unknown-linux-gnu"));
+    assert!(linux_output.contains("armando-1.2.3-x86_64-unknown-linux-gnu.tar.gz"));
+    assert!(linux_output.contains("Dry run for armando bootstrap"));
+
+    let macos_output = bootstrap_release_dry_run_output("Darwin", "arm64");
+    assert!(macos_output.contains("aarch64-apple-darwin"));
+    assert!(macos_output.contains("armando-1.2.3-aarch64-apple-darwin.tar.gz"));
+    assert!(macos_output.contains("Dry run for armando bootstrap"));
 }
 
 #[test]

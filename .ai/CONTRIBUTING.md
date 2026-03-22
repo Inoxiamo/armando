@@ -58,11 +58,20 @@ Useful overrides:
 ## Working Rules
 
 - Keep changes focused and coherent.
+- This repository uses a vibe-coding workflow for speed, but every change still needs automated checks plus two manual reviews: the implementing agent validates the result, then the parent agent gets a recap before any push.
 - Update public root docs when install, shortcut, release, or repository-structure behavior changes.
+- Update both internal `.ai` docs and public root docs when the install or update flow changes.
 - Update [`STATUS.md`](STATUS.md) when user-visible behavior changes.
 - Update [`ARCHITECTURE.md`](ARCHITECTURE.md) when components, runtime paths, or flows change.
+- Child agents must call the parent agent with a recap before push readiness is accepted.
 - Prefer Conventional Commit messages.
 - Do not commit secrets or local-only configuration.
+
+## Distribution Docs Hygiene
+
+- Keep [`../INSTALL.md`](../INSTALL.md), [`../RELEASES.md`](../RELEASES.md), [`STATUS.md`](STATUS.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`ROADMAP.md`](ROADMAP.md) aligned whenever release packaging, install steps, artifact naming, or update behavior changes.
+- Treat bootstrap scripts as orchestration only. Do not duplicate the file-copy or layout logic already owned by the bundled release installers.
+- When release artifacts or installer entrypoints change, verify both the manual bundle install path and the remote bootstrap path are still documented accurately.
 
 ## Release Hygiene
 

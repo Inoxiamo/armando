@@ -1,8 +1,7 @@
-aliases: null
 auto_read_selection: true
-default_backend: chatgpt
+default_backend: ollama
 theme:
-  name: nerv-hud
+  name: default-dark
   path: null
 ui:
   language: en
@@ -22,4 +21,4 @@ claude:
   model: claude-3-5-sonnet-latest
 ollama:
   base_url: http://localhost:11434
-  model: gemma3:latest
+  model: gemma3:1b

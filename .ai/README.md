@@ -17,6 +17,8 @@ This folder is the internal documentation hub for the project.
 - update [`STATUS.md`](STATUS.md) when the product behavior changes
 - update [`ARCHITECTURE.md`](ARCHITECTURE.md) when components, file flows, or runtime paths change
 - update [`ROADMAP.md`](ROADMAP.md) when delivery priorities change
+- this repo uses vibe coding for speed, but every change still needs automated validation plus two manual checks before push: the implementing agent's pass and the parent agent recap/review
+- child agents must stop and brief the parent agent before push readiness is accepted
 - keep public user docs at the repository root and internal maintenance docs in `.ai/`
 
 ## Public Docs

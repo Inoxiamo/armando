@@ -41,6 +41,10 @@ pub fn default_config_path() -> anyhow::Result<PathBuf> {
         })
 }
 
+pub fn bundled_default_config_template_path() -> anyhow::Result<Option<PathBuf>> {
+    bundled_config_template_path(DEFAULT_CONFIG_FILE_NAME)
+}
+
 pub fn candidate_config_paths() -> anyhow::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
 
@@ -62,6 +66,61 @@ pub fn candidate_config_paths() -> anyhow::Result<Vec<PathBuf>> {
 
     if let Some(root) = central_config_root() {
         collect_config_candidates_for_root(&root, &mut paths);
+    }
+
+    Ok(paths)
+}
+
+pub fn discover_config_template_names() -> anyhow::Result<Vec<String>> {
+    let mut names = discover_named_files(CONFIGS_DIR_NAME, "yaml")?;
+    names.retain(|name| name != "config");
+    Ok(names)
+}
+
+pub fn bundled_config_template_path(template_name: &str) -> anyhow::Result<Option<PathBuf>> {
+    let target = default_config_path().ok();
+
+    for path in candidate_config_template_paths(template_name)? {
+        if !path.exists() {
+            continue;
+        }
+        if target.as_ref().is_some_and(|candidate| candidate == &path) {
+            continue;
+        }
+        return Ok(Some(path));
+    }
+
+    Ok(None)
+}
+
+pub fn candidate_config_template_paths(template_name: &str) -> anyhow::Result<Vec<PathBuf>> {
+    let file_name = format!("{template_name}.yaml");
+    let mut paths = Vec::new();
+
+    if let Ok(explicit) = std::env::var("ARMANDO_CONFIG") {
+        let explicit_path = PathBuf::from(explicit);
+        push_unique(&mut paths, explicit_path.with_file_name(&file_name));
+        push_unique(
+            &mut paths,
+            explicit_path
+                .with_file_name(CONFIGS_DIR_NAME)
+                .join(&file_name),
+        );
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            collect_named_config_candidates_for_root(parent, &file_name, &mut paths);
+            if let Some(grandparent) = parent.parent().and_then(|path| path.parent()) {
+                collect_named_config_candidates_for_root(grandparent, &file_name, &mut paths);
+            }
+        }
+    }
+
+    collect_named_config_candidates_for_root(&std::env::current_dir()?, &file_name, &mut paths);
+
+    if let Some(root) = central_config_root() {
+        collect_named_config_candidates_for_root(&root, &file_name, &mut paths);
     }
 
     Ok(paths)
@@ -178,6 +237,15 @@ fn collect_config_candidates_for_root(root: &Path, paths: &mut Vec<PathBuf>) {
         root.join(CONFIGS_DIR_NAME).join(DEFAULT_CONFIG_FILE_NAME),
     );
     push_unique(paths, root.join(LEGACY_CONFIG_FILE_NAME));
+}
+
+fn collect_named_config_candidates_for_root(
+    root: &Path,
+    file_name: &str,
+    paths: &mut Vec<PathBuf>,
+) {
+    push_unique(paths, root.join(CONFIGS_DIR_NAME).join(file_name));
+    push_unique(paths, root.join(file_name));
 }
 
 fn theme_roots_from_config(config_path: &Path) -> Vec<PathBuf> {
@@ -309,5 +377,16 @@ mod tests {
         let roots = theme_roots_from_config(Path::new("/tmp/armando/configs/default.yaml"));
 
         assert!(roots.contains(&PathBuf::from("/tmp/armando/themes")));
+    }
+
+    #[test]
+    fn discover_config_template_names_includes_bundled_profiles() {
+        let names = discover_config_template_names().unwrap();
+
+        assert!(names.contains(&"default".to_string()));
+        assert!(names.contains(&"local".to_string()));
+        assert!(names.contains(&"work".to_string()));
+        assert!(names.contains(&"personal".to_string()));
+        assert!(names.contains(&"beta".to_string()));
     }
 }

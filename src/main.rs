@@ -21,12 +21,12 @@ fn run_ui(
     // Create tokio runtime for async backend queries
     let rt = Arc::new(Runtime::new()?);
     let theme = load_theme(&cfg)?;
-    let initial_window_height = cfg.ui.window_height.max(560.0);
+    let initial_window_height = cfg.ui.window_height.clamp(500.0, 620.0);
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([980.0, initial_window_height])
-            .with_min_inner_size([820.0, 560.0])
+            .with_min_inner_size([820.0, 500.0])
             .with_app_id("armando")
             .with_always_on_top()
             .with_resizable(true)

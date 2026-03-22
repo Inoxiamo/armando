@@ -18,6 +18,29 @@ If you want the simplest local setup, start with `ollama`.
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>
 - All releases: <https://github.com/Inoxiamo/armando/releases>
 
+If you prefer a guided install or update on Linux or macOS, you can use the bootstrap wrapper instead of downloading the archive manually:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh | bash
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh | bash
+```
+
+Safer alternative without pipe-to-shell:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh
+bash bootstrap-release.sh
+```
+
+The bootstrap wrapper currently supports Linux x86_64 and macOS Apple Silicon. It resolves the matching artifact, downloads the release bundle and checksum, verifies the checksum when supported by the system, extracts the archive into a temporary directory, and then runs the bundled `scripts/install.sh`.
+
+If `armando` is already running, the settings footer also shows the latest release state and, on Linux or macOS, a copyable bootstrap command for the guided update path.
+When the desktop app detects a newer GitHub release, the settings footer now also shows a platform-aware suggested update path. On Linux and macOS it points to the bootstrap command; on Windows it points to the release page and packaged installer flow.
+On first run, the startup card can also seed the writable config from one of the bundled profiles, so you can begin from a known-good template instead of a blank file.
+
 Pick the archive that matches your OS:
 
 - Linux x86_64: `armando-<version>-x86_64-unknown-linux-gnu.tar.gz`
@@ -89,6 +112,9 @@ Launch it:
 
 If you set `XDG_CONFIG_HOME` or `XDG_DATA_HOME`, the installer and the app honor those directories instead of the defaults above.
 Existing config, prompt preset, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
+The bootstrap wrapper forwards `FORCE_CONFIG_INSTALL=1` if you export it before running the command.
+
+If you prefer the manual path, the in-app update footer still opens the release page so you can download the archive or installer directly.
 
 ## macOS
 
@@ -119,6 +145,7 @@ Launch it:
 ```
 
 Existing config, prompt preset, theme, and locale files are preserved during install by default. Set `FORCE_CONFIG_INSTALL=1` only if you explicitly want bundled defaults to overwrite them.
+The bootstrap wrapper forwards `FORCE_CONFIG_INSTALL=1` if you export it before running the command.
 
 ## Windows
 

@@ -9,15 +9,19 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
+use crate::app_paths;
 use crate::backends;
 use crate::backends::PromptMode;
+use crate::backends::ResponseProgress;
+use crate::backends::ResponseProgressSink;
 use crate::backends::{ConversationTurn, HealthCheck, HealthLevel, ImageAttachment, QueryInput};
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
 use crate::prompt_profiles::PromptProfiles;
 use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
-use crate::update::{self, ReleaseInfo};
+use crate::update::{self, ReleaseInfo, UpdateAction};
+use crate::window_context;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -303,6 +307,7 @@ struct RequestFingerprint {
     mode: PromptMode,
     session_chat_enabled: bool,
     conversation: Vec<ConversationTurn>,
+    active_window_context: Option<String>,
 }
 
 #[derive(Default)]
@@ -335,6 +340,8 @@ enum ReleaseCheckState {
     UpdateAvailable(ReleaseInfo),
     Error(String),
 }
+
+const SESSION_HISTORY_LIMIT: usize = 24;
 
 pub struct AiPopupApp {
     config: Config,
@@ -371,6 +378,8 @@ pub struct AiPopupApp {
     settings_notice: Option<String>,
     show_settings: bool,
     pending_submission: Option<(String, String)>,
+    last_submitted_request: Option<RequestFingerprint>,
+    first_run_template: String,
     available_themes: Vec<String>,
     available_locales: Vec<LocaleDefinition>,
     i18n: I18n,
@@ -380,6 +389,7 @@ pub struct AiPopupApp {
 
     // For tokio to update UI when done
     async_response: Arc<Mutex<Option<Result<String, String>>>>,
+    async_response_chunks: Arc<Mutex<Vec<String>>>,
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
     async_available_models: AsyncAvailableModels,
     async_release_check: AsyncReleaseCheck,
@@ -423,6 +433,16 @@ impl AiPopupApp {
         let fallback_theme_name = config.theme.name.clone();
         let prompt_editor_height = default_prompt_editor_height(config.ui.window_height);
         let response_editor_height = default_response_editor_height(config.ui.window_height);
+        let first_run_template = app_paths::discover_config_template_names()
+            .ok()
+            .and_then(|names| {
+                if names.iter().any(|name| name == "default") {
+                    Some("default".to_string())
+                } else {
+                    names.into_iter().next()
+                }
+            })
+            .unwrap_or_else(|| "default".to_string());
 
         let mut app = Self {
             config,
@@ -457,6 +477,8 @@ impl AiPopupApp {
             settings_notice: None,
             show_settings: false,
             pending_submission: None,
+            last_submitted_request: None,
+            first_run_template,
             available_themes: available_theme_names().unwrap_or_else(|_| vec![fallback_theme_name]),
             available_locales: available_locales().unwrap_or_default(),
             i18n,
@@ -464,6 +486,7 @@ impl AiPopupApp {
             toolbar_icon_textures: load_toolbar_icon_textures(&cc.egui_ctx),
             toolbar_icon_scale: cc.egui_ctx.pixels_per_point(),
             async_response: Arc::new(Mutex::new(None)),
+            async_response_chunks: Arc::new(Mutex::new(Vec::new())),
             async_dictation: Arc::new(Mutex::new(None)),
             async_available_models: Arc::new(Mutex::new(Vec::new())),
             async_release_check: Arc::new(Mutex::new(None)),
@@ -475,6 +498,19 @@ impl AiPopupApp {
     }
 
     fn check_async_response(&mut self, _ctx: &egui::Context) {
+        let response_chunks = {
+            let mut chunk_lock = self.async_response_chunks.lock().unwrap();
+            std::mem::take(&mut *chunk_lock)
+        };
+
+        for chunk in response_chunks {
+            let had_placeholder = self.response.starts_with("⏳ Querying ");
+            if had_placeholder {
+                self.response.clear();
+            }
+            self.response.push_str(&chunk);
+        }
+
         let res = {
             let mut resp_lock = self.async_response.lock().unwrap();
             resp_lock.take()
@@ -484,12 +520,17 @@ impl AiPopupApp {
             self.is_loading = false;
             match res {
                 Ok(text) => {
-                    self.response = text;
+                    if !text.is_empty() {
+                        self.response = text;
+                    }
                     if let Some((backend, prompt)) = self.pending_submission.take() {
-                        if self.config.history.enabled {
-                            if let Ok(entry) = history::new_entry(&backend, &prompt, &self.response)
-                            {
-                                self.session_history_entries.insert(0, entry);
+                        if let Ok(entry) = history::new_entry(&backend, &prompt, &self.response) {
+                            push_session_history_entry(
+                                &mut self.session_history_entries,
+                                entry.clone(),
+                            );
+                            if self.config.history.enabled {
+                                let _ = history::append_entry(entry);
                             }
                         }
                         if self.session_chat_enabled {
@@ -498,8 +539,8 @@ impl AiPopupApp {
                                 assistant_response: self.response.clone(),
                             });
                         }
+                        self.last_completed_request = self.last_submitted_request.take();
                     }
-                    self.last_completed_request = Some(self.current_request_fingerprint());
                     self.reload_history();
                     if self.auto_copy_close_after_response {
                         self.auto_copy_close_after_response = false;
@@ -509,6 +550,7 @@ impl AiPopupApp {
                 Err(e) => {
                     self.response = format!("Error: {e}");
                     self.pending_submission = None;
+                    self.last_submitted_request = None;
                     self.auto_copy_close_after_response = false;
                 }
             }
@@ -591,7 +633,8 @@ impl AiPopupApp {
             return;
         }
 
-        let current_request = self.current_request_fingerprint();
+        let active_window_context = window_context::current_active_window_context();
+        let current_request = self.current_request_fingerprint(active_window_context.as_deref());
         if self
             .last_completed_request
             .as_ref()
@@ -624,12 +667,24 @@ impl AiPopupApp {
         let config = self.config.clone();
         let prompt_profiles = self.prompt_profiles.clone();
         let async_response = self.async_response.clone();
-        let ctx = ctx.clone();
+        let async_response_chunks = self.async_response_chunks.clone();
+        let progress_ctx = ctx.clone();
         self.pending_submission = Some((backend.clone(), prompt.clone()));
+        self.last_submitted_request = Some(current_request);
         self.attachment_notice = None;
         self.attachment_error = None;
+        self.async_response_chunks.lock().unwrap().clear();
+
+        let response_progress: Option<ResponseProgressSink> =
+            Some(Arc::new(move |event: ResponseProgress| match event {
+                ResponseProgress::Chunk(chunk) => {
+                    async_response_chunks.lock().unwrap().push(chunk);
+                    progress_ctx.request_repaint();
+                }
+            }));
 
         // Spawn async task
+        let ctx = ctx.clone();
         self.runtime.spawn(async move {
             let res = backends::query(
                 &backend,
@@ -637,10 +692,12 @@ impl AiPopupApp {
                     prompt,
                     images,
                     conversation,
+                    active_window_context,
                 },
                 &config,
                 &prompt_profiles,
                 mode,
+                response_progress,
             )
             .await;
 
@@ -655,7 +712,6 @@ impl AiPopupApp {
     fn reload_history(&mut self) {
         if !self.config.history.enabled {
             self.history_entries.clear();
-            self.session_history_entries.clear();
             self.selected_history_entries.clear();
             self.history_error = None;
             self.history_action_error = None;
@@ -665,20 +721,10 @@ impl AiPopupApp {
         match history::recent_entries() {
             Ok(entries) => {
                 self.history_entries = entries;
-                self.session_history_entries.retain(|entry| {
-                    let entry_id = history::entry_id(entry);
-                    self.history_entries
-                        .iter()
-                        .any(|persisted| history::entry_id(persisted) == entry_id)
-                });
                 self.selected_history_entries.retain(|id| {
                     self.history_entries
                         .iter()
                         .any(|entry| history::entry_id(entry) == *id)
-                        || self
-                            .session_history_entries
-                            .iter()
-                            .any(|entry| history::entry_id(entry) == *id)
                 });
                 self.history_error = None;
                 self.history_action_error = None;
@@ -700,8 +746,6 @@ impl AiPopupApp {
         let ids: Vec<String> = self.selected_history_entries.iter().cloned().collect();
         match history::delete_entries(&ids) {
             Ok(()) => {
-                self.session_history_entries
-                    .retain(|entry| !ids.iter().any(|id| id == &history::entry_id(entry)));
                 self.selected_history_entries.clear();
                 self.reload_history();
             }
@@ -730,15 +774,10 @@ impl AiPopupApp {
             return;
         }
         let mut ids: Vec<String> = self
-            .session_history_entries
+            .filtered_history_entries()
             .iter()
             .map(history::entry_id)
             .collect();
-        ids.extend(
-            self.filtered_history_entries()
-                .iter()
-                .map(history::entry_id),
-        );
         ids.sort();
         ids.dedup();
 
@@ -748,8 +787,6 @@ impl AiPopupApp {
 
         match history::delete_entries(&ids) {
             Ok(()) => {
-                self.session_history_entries
-                    .retain(|entry| !ids.iter().any(|id| id == &history::entry_id(entry)));
                 self.selected_history_entries.clear();
                 self.reload_history();
             }
@@ -855,6 +892,7 @@ impl AiPopupApp {
             Err(err) => {
                 self.settings_error =
                     Some(self.tr_with("app.settings_save_error", &[("error", err.to_string())]));
+                self.settings_notice = None;
             }
         }
     }
@@ -869,6 +907,7 @@ impl AiPopupApp {
             Err(err) => {
                 self.settings_error =
                     Some(self.tr_with("app.settings_save_error", &[("error", err.to_string())]));
+                self.settings_notice = None;
             }
         }
     }
@@ -880,8 +919,133 @@ impl AiPopupApp {
                 self.settings_error = None;
             }
             Err(err) => {
-                self.settings_error =
-                    Some(self.tr_with("app.settings_save_error", &[("error", err.to_string())]));
+                let save_path = self.config.loaded_from.clone().unwrap_or_else(|| {
+                    app_paths::default_config_path()
+                        .unwrap_or_else(|_| PathBuf::from("config.yaml"))
+                });
+                self.settings_error = Some(self.tr_with(
+                    "app.settings_save_error_with_path",
+                    &[
+                        ("path", save_path.display().to_string()),
+                        ("error", err.to_string()),
+                    ],
+                ));
+                self.settings_notice = None;
+            }
+        }
+    }
+
+    fn create_config_from_template(&mut self, ctx: &egui::Context, template_name: &str) {
+        let path = match app_paths::default_config_path() {
+            Ok(path) => path,
+            Err(err) => {
+                self.settings_error = Some(self.tr_with(
+                    "startup.config_destination_error",
+                    &[("error", err.to_string())],
+                ));
+                self.settings_notice = None;
+                return;
+            }
+        };
+
+        let template_config = match Config::load_template(template_name) {
+            Ok(Some(mut config)) => {
+                config.loaded_from = None;
+                config
+            }
+            Ok(None) => {
+                self.settings_error = Some(self.tr_with(
+                    "startup.config_template_missing",
+                    &[("template", template_name.to_string())],
+                ));
+                self.settings_notice = None;
+                return;
+            }
+            Err(err) => {
+                self.settings_error = Some(self.tr_with(
+                    "startup.config_template_load_error",
+                    &[
+                        ("template", template_name.to_string()),
+                        ("error", err.to_string()),
+                    ],
+                ));
+                self.settings_notice = None;
+                return;
+            }
+        };
+
+        if let Some(parent) = path.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                self.settings_error = Some(self.tr_with(
+                    "startup.config_template_save_error",
+                    &[
+                        ("template", template_name.to_string()),
+                        ("error", err.to_string()),
+                    ],
+                ));
+                self.settings_notice = None;
+                return;
+            }
+        }
+
+        let serialized = match serde_yaml::to_string(&template_config) {
+            Ok(content) => content,
+            Err(err) => {
+                self.settings_error = Some(self.tr_with(
+                    "startup.config_template_save_error",
+                    &[
+                        ("template", template_name.to_string()),
+                        ("error", err.to_string()),
+                    ],
+                ));
+                self.settings_notice = None;
+                return;
+            }
+        };
+
+        if let Err(err) = std::fs::write(&path, serialized) {
+            self.settings_error = Some(self.tr_with(
+                "startup.config_template_save_error",
+                &[
+                    ("template", template_name.to_string()),
+                    ("error", err.to_string()),
+                ],
+            ));
+            self.settings_notice = None;
+            return;
+        }
+
+        match Config::load() {
+            Ok(config) => {
+                self.config = config;
+                self.selected_backend = self.config.default_backend.clone();
+                self.prompt_profiles = PromptProfiles::load(&self.config)
+                    .unwrap_or_else(|_| PromptProfiles::default_built_in());
+                if let Ok(theme) =
+                    load_theme_by_name(&self.config.theme.name, self.config.loaded_from.as_deref())
+                {
+                    self.theme = theme.clone();
+                    ctx.set_style(build_style(&theme));
+                }
+                if let Ok(i18n) = I18n::load(&self.config.ui.language) {
+                    self.i18n = i18n;
+                }
+                self.prompt_focus_initialized = false;
+                self.settings_error = None;
+                self.settings_notice = Some(self.tr_with(
+                    "startup.config_template_created",
+                    &[("template", template_name.to_string())],
+                ));
+            }
+            Err(err) => {
+                self.settings_error = Some(self.tr_with(
+                    "startup.config_template_load_error",
+                    &[
+                        ("template", template_name.to_string()),
+                        ("error", err.to_string()),
+                    ],
+                ));
+                self.settings_notice = None;
             }
         }
     }
@@ -997,7 +1161,10 @@ impl AiPopupApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    fn current_request_fingerprint(&self) -> RequestFingerprint {
+    fn current_request_fingerprint(
+        &self,
+        active_window_context: Option<&str>,
+    ) -> RequestFingerprint {
         RequestFingerprint {
             backend: self.selected_backend.clone(),
             prompt: self.prompt.clone(),
@@ -1013,6 +1180,7 @@ impl AiPopupApp {
             } else {
                 Vec::new()
             },
+            active_window_context: active_window_context.map(|value| value.to_string()),
         }
     }
 
@@ -1128,28 +1296,263 @@ fn render_main_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::U
                 }
                 render_response_section(app, ctx, ui);
 
+                if !app.session_history_entries.is_empty() {
+                    ui.add_space(16.0);
+                    render_session_history_section(app, ctx, ui);
+                }
+
                 if app.show_history {
                     ui.add_space(16.0);
-                    render_history_section(app, ctx, ui);
+                    render_persistent_history_section(app, ctx, ui);
                 }
             });
         });
 }
 
 fn status_section_has_content(app: &AiPopupApp) -> bool {
-    !app.attachments.is_empty()
-        || app.dictation_status.is_some()
-        || app.attachment_notice.is_some()
-        || app.attachment_error.is_some()
-        || app.settings_notice.is_some()
-        || app.settings_error.is_some()
+    status_section_has_content_state(
+        !app.attachments.is_empty(),
+        app.dictation_status.is_some(),
+        app.attachment_notice.is_some(),
+        app.attachment_error.is_some(),
+        app.settings_notice.is_some(),
+        app.settings_error.is_some(),
+    )
+}
+
+fn status_section_has_content_state(
+    has_attachments: bool,
+    has_dictation_status: bool,
+    has_attachment_notice: bool,
+    has_attachment_error: bool,
+    has_settings_notice: bool,
+    has_settings_error: bool,
+) -> bool {
+    has_attachments
+        || has_dictation_status
+        || has_attachment_notice
+        || has_attachment_error
+        || has_settings_notice
+        || has_settings_error
+}
+
+fn render_startup_health_section(app: &AiPopupApp, ui: &mut egui::Ui) {
+    let diagnostics = backends::startup_health_checks(&app.config, &app.selected_backend);
+
+    card_frame(
+        ui.ctx(),
+        app.theme.panel_fill_soft,
+        app.theme.border_color.gamma_multiply(0.65),
+    )
+    .show(ui, |ui| {
+        for (index, diagnostic) in diagnostics.iter().enumerate() {
+            render_startup_health_row(app, ui, diagnostic);
+            if index + 1 < diagnostics.len() {
+                ui.add_space(8.0);
+            }
+        }
+    });
+}
+
+fn render_first_run_setup_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
+    let config_path = app_paths::default_config_path();
+    let create_enabled = config_path.is_ok();
+    let template_names = app_paths::discover_config_template_names().unwrap_or_default();
+
+    card_frame(
+        ui.ctx(),
+        app.theme.panel_fill_soft,
+        app.theme.border_color.gamma_multiply(0.65),
+    )
+    .show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(section_label(
+                &app.tr("startup.first_run_setup"),
+                app.theme.text_color,
+            ));
+        });
+        ui.add_space(6.0);
+
+        match &config_path {
+            Ok(path) => {
+                ui.label(
+                    egui::RichText::new(app.tr_with(
+                        "startup.config_destination",
+                        &[("path", path.display().to_string())],
+                    ))
+                    .small()
+                    .color(app.theme.weak_text_color),
+                );
+            }
+            Err(err) => {
+                ui.colored_label(
+                    app.theme.danger_color,
+                    app.tr_with(
+                        "startup.config_destination_error",
+                        &[("error", err.to_string())],
+                    ),
+                );
+            }
+        }
+
+        if !template_names.is_empty() {
+            ui.add_space(6.0);
+            ui.label(muted_label(
+                &app.tr("startup.config_templates"),
+                app.theme.weak_text_color,
+            ));
+
+            let template_theme = app.theme.clone();
+            dropdown_box_scope(ui, &template_theme, |ui| {
+                egui::ComboBox::from_id_source("startup_config_template")
+                    .selected_text(dropdown_button_text(
+                        &app.first_run_template,
+                        &template_theme,
+                    ))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        apply_dropdown_menu_style(ui, &template_theme);
+                        for template_name in template_names.iter() {
+                            if ui
+                                .selectable_label(
+                                    app.first_run_template == *template_name,
+                                    dropdown_item_text(template_name, &template_theme),
+                                )
+                                .clicked()
+                            {
+                                app.first_run_template = template_name.clone();
+                            }
+                        }
+                    });
+            });
+        }
+
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    create_enabled,
+                    primary_action_button(
+                        &app.tr("startup.create_config_from_template"),
+                        app.theme.accent_color,
+                        app.theme.accent_text_color,
+                    ),
+                )
+                .clicked()
+            {
+                let template_name = app.first_run_template.clone();
+                app.create_config_from_template(ui.ctx(), &template_name);
+            }
+
+            if ui
+                .add_enabled(
+                    create_enabled,
+                    secondary_action_button(
+                        &app.tr("startup.open_config_folder"),
+                        app.theme.panel_fill_soft,
+                    ),
+                )
+                .clicked()
+            {
+                if let Ok(path) = &config_path {
+                    if let Some(parent) = path.parent() {
+                        app.settings_error = open_path_in_file_manager(parent).err().map(|err| {
+                            app.tr_with(
+                                "startup.open_config_folder_error",
+                                &[("error", err.to_string())],
+                            )
+                        });
+                    }
+                }
+            }
+        });
+
+        if let Some(hint) = startup_first_run_hint(app, &config_path) {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(hint)
+                    .small()
+                    .color(app.theme.weak_text_color),
+            );
+        }
+    });
+}
+
+fn render_startup_health_row(app: &AiPopupApp, ui: &mut egui::Ui, diagnostic: &HealthCheck) {
+    let label = startup_health_label(app, diagnostic);
+    let status_color = health_level_color(app, &diagnostic.level);
+
+    ui.horizontal_wrapped(|ui| {
+        ui.label(muted_label(&label, app.theme.weak_text_color));
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(&diagnostic.summary)
+                .strong()
+                .color(status_color),
+        );
+    });
+    ui.label(
+        egui::RichText::new(&diagnostic.detail)
+            .small()
+            .color(app.theme.weak_text_color),
+    );
+    if let Some(hint) = startup_recovery_hint(app, diagnostic) {
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new(hint)
+                .small()
+                .color(app.theme.weak_text_color),
+        );
+    }
+}
+
+fn startup_health_label(app: &AiPopupApp, diagnostic: &HealthCheck) -> String {
+    match diagnostic.backend.as_str() {
+        "config" => app.tr("startup.config_source"),
+        "selected-backend" => app.tr("startup.selected_backend"),
+        "dictation-tools" => app.tr("startup.dictation_tools"),
+        "clipboard-tools" => app.tr("startup.clipboard_tools"),
+        _ => diagnostic.backend.clone(),
+    }
+}
+
+fn startup_recovery_hint(app: &AiPopupApp, diagnostic: &HealthCheck) -> Option<String> {
+    if matches!(diagnostic.level, HealthLevel::Ok) {
+        return None;
+    }
+
+    let hint = match diagnostic.backend.as_str() {
+        "config" => app.tr("startup.config_recovery_hint"),
+        "selected-backend" => app.tr("startup.selected_backend_recovery_hint"),
+        "dictation-tools" => app.tr("startup.dictation_tools_recovery_hint"),
+        "clipboard-tools" => app.tr("startup.clipboard_tools_recovery_hint"),
+        _ => return None,
+    };
+
+    Some(hint)
+}
+
+fn startup_first_run_hint(
+    app: &AiPopupApp,
+    config_path: &anyhow::Result<PathBuf>,
+) -> Option<String> {
+    match config_path {
+        Ok(path) => Some(app.tr_with(
+            "startup.first_run_hint",
+            &[("path", path.display().to_string())],
+        )),
+        Err(err) => Some(app.tr_with(
+            "startup.first_run_hint_error",
+            &[("error", err.to_string())],
+        )),
+    }
 }
 
 fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     let backend_label = app.tr("app.backend");
     let generic_mode_label = app.tr("app.generic_mode");
     let session_chat_label = app.tr("app.session_chat_mode");
-    let settings_open_label = app.tr("app.settings_open");
+    let settings_open_label = app.tr("app.settings");
 
     ui.horizontal(|ui| {
         ui.label(muted_label(&backend_label, app.theme.weak_text_color));
@@ -1171,7 +1574,7 @@ fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui:
         ui.add_space(6.0);
         ui.checkbox(&mut app.session_chat_enabled, session_chat_label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(14.0);
+            ui.add_space(section_actions_right_inset());
             let gear = icon_action_button(
                 app,
                 ToolbarIcon::Settings,
@@ -1187,10 +1590,12 @@ fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui:
 
 fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     let prompt_section_label = app.tr("app.prompt");
+    let prompt_id = ui.make_persistent_id("prompt_input");
 
     ui.horizontal(|ui| {
         ui.label(section_label(&prompt_section_label, app.theme.text_color));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(section_actions_right_inset());
             let send_clicked = ui
                 .add_enabled(
                     !app.is_loading,
@@ -1271,19 +1676,26 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
             }
         });
     });
-    ui.add_space(6.0);
+    ui.add_space(4.0);
 
-    let prompt_id = ui.make_persistent_id("prompt_input");
     let prompt_hint = app.tr("app.prompt_hint");
-    let prompt_rows = ((app.prompt_editor_height / 22.0).round() as usize).clamp(4, 28);
+    let prompt_max_height = editor_max_height(ctx, 88.0);
+    app.prompt_editor_height = app.prompt_editor_height.clamp(88.0, prompt_max_height);
     let prompt_before_edit = app.prompt.clone();
     let input_output = input_frame(ctx, app.theme.panel_fill).show(ui, |ui| {
-        egui::TextEdit::multiline(&mut app.prompt)
-            .id(prompt_id)
-            .hint_text(prompt_hint)
-            .desired_width(f32::INFINITY)
-            .desired_rows(prompt_rows)
-            .show(ui)
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), app.prompt_editor_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_height(app.prompt_editor_height);
+                egui::TextEdit::multiline(&mut app.prompt)
+                    .id(prompt_id)
+                    .hint_text(prompt_hint)
+                    .desired_width(f32::INFINITY)
+                    .show(ui)
+            },
+        )
+        .inner
     });
     let input_output = input_output.inner;
     let input_resp = &input_output.response;
@@ -1365,8 +1777,8 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
         ui,
         &app.theme,
         &mut app.prompt_editor_height,
-        160.0,
-        720.0,
+        88.0,
+        prompt_max_height,
         Some(prompt_helper_text.as_str()),
     );
 }
@@ -1425,6 +1837,14 @@ fn render_status_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
     });
 }
 
+fn health_level_color(app: &AiPopupApp, level: &HealthLevel) -> egui::Color32 {
+    match level {
+        HealthLevel::Ok => app.theme.accent_color,
+        HealthLevel::Warning => egui::Color32::from_rgb(227, 177, 76),
+        HealthLevel::Error => app.theme.danger_color,
+    }
+}
+
 fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     let response_section_label = app.tr("app.response");
 
@@ -1439,6 +1859,7 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(section_actions_right_inset());
             let history_count = app.history_entries.len();
             let history_label = if app.show_history {
                 app.tr_with("app.hide_history", &[("count", history_count.to_string())])
@@ -1487,33 +1908,44 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
             }
         });
     });
-    ui.add_space(6.0);
+    ui.add_space(4.0);
 
+    let response_max_height = editor_max_height(ctx, 140.0);
+    app.response_editor_height = app.response_editor_height.clamp(84.0, response_max_height);
     input_frame(ctx, app.theme.panel_fill).show(ui, |ui| {
-        let response_rows = ((app.response_editor_height / 22.0).round() as usize).clamp(4, 28);
-        ui.add(
-            egui::TextEdit::multiline(&mut app.response.as_str())
-                .desired_width(f32::INFINITY)
-                .desired_rows(response_rows)
-                .font(egui::TextStyle::Monospace),
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), app.response_editor_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_height(app.response_editor_height);
+                ui.add_sized(
+                    egui::vec2(ui.available_width(), app.response_editor_height),
+                    egui::TextEdit::multiline(&mut app.response.as_str())
+                        .desired_width(f32::INFINITY)
+                        .font(egui::TextStyle::Monospace),
+                );
+            },
         );
     });
     editor_resize_row(
         ui,
         &app.theme,
         &mut app.response_editor_height,
-        140.0,
-        720.0,
+        84.0,
+        response_max_height,
         None,
     );
 }
 
-fn render_history_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
+fn render_session_history_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(section_label(&app.tr("app.history"), app.theme.text_color));
+        ui.label(section_label(
+            &app.tr("app.session_history"),
+            app.theme.text_color,
+        ));
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(app.tr("app.last_7_days"))
+            egui::RichText::new(app.tr("app.session_history_note"))
                 .small()
                 .color(app.theme.weak_text_color),
         );
@@ -1521,7 +1953,27 @@ fn render_history_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut eg
     ui.add_space(8.0);
 
     card_frame(ctx, app.theme.panel_fill, app.theme.border_color).show(ui, |ui| {
-        render_history_actions(app, ui);
+        render_session_history_entries(app, ctx, ui);
+    });
+}
+
+fn render_persistent_history_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(section_label(
+            &app.tr("app.saved_history"),
+            app.theme.text_color,
+        ));
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(app.tr("app.saved_history_note"))
+                .small()
+                .color(app.theme.weak_text_color),
+        );
+    });
+    ui.add_space(8.0);
+
+    card_frame(ctx, app.theme.panel_fill, app.theme.border_color).show(ui, |ui| {
+        render_persistent_history_actions(app, ui);
 
         if let Some(error) = &app.history_error {
             ui.add_space(8.0);
@@ -1532,15 +1984,14 @@ fn render_history_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut eg
         }
 
         ui.add_space(12.0);
-        render_session_history_entries(app, ctx, ui);
         render_saved_history_entries(app, ctx, ui);
     });
 }
 
-fn render_history_actions(app: &mut AiPopupApp, ui: &mut egui::Ui) {
+fn render_persistent_history_actions(app: &mut AiPopupApp, ui: &mut egui::Ui) {
     let all_backends = app.tr("app.all_backends");
     let history_search_hint = app.tr("app.search_history");
-    let open_history_label = app.tr("app.open_history_file");
+    let open_history_label = app.tr("app.open_saved_history_file");
     let select_all_label = app.tr("app.select_all");
     let delete_all_label = app.tr("app.delete_all");
     let delete_selected_label = app.tr_with(
@@ -1633,6 +2084,7 @@ fn render_session_history_entries(app: &mut AiPopupApp, ctx: &egui::Context, ui:
             &app.tr("app.select_entry"),
             &app.tr("app.history_prompt"),
             &app.tr("app.history_response"),
+            false,
             ui,
             ctx,
             &app.theme,
@@ -1654,7 +2106,9 @@ fn render_session_history_entries(app: &mut AiPopupApp, ctx: &egui::Context, ui:
 fn render_saved_history_entries(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     let entries = app.filtered_history_entries();
     if entries.is_empty() {
-        ui.label(egui::RichText::new(app.tr("app.no_history")).color(app.theme.weak_text_color));
+        ui.label(
+            egui::RichText::new(app.tr("app.no_saved_history")).color(app.theme.weak_text_color),
+        );
         return;
     }
 
@@ -1671,6 +2125,7 @@ fn render_saved_history_entries(app: &mut AiPopupApp, ctx: &egui::Context, ui: &
                     &app.tr("app.select_entry"),
                     &app.tr("app.history_prompt"),
                     &app.tr("app.history_response"),
+                    true,
                     ui,
                     ctx,
                     &app.theme,
@@ -1704,11 +2159,11 @@ fn selected_history_backend_label<'a>(
 }
 
 fn section_label(text: &str, color: egui::Color32) -> egui::RichText {
-    egui::RichText::new(text).strong().size(15.0).color(color)
+    egui::RichText::new(text).strong().size(15.5).color(color)
 }
 
 fn muted_label(text: &str, color: egui::Color32) -> egui::RichText {
-    egui::RichText::new(text).small().color(color)
+    egui::RichText::new(text).size(13.5).color(color)
 }
 
 fn dropdown_button_text(text: &str, theme: &ResolvedTheme) -> egui::RichText {
@@ -2097,10 +2552,19 @@ fn paint_history_icon(
 }
 
 fn paint_copy_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
-    let back = rect.translate(egui::vec2(-2.5, -2.5)).shrink(3.5);
-    let front = rect.translate(egui::vec2(2.0, 2.0)).shrink(3.5);
-    painter.rect_stroke(back, egui::Rounding::same(2.0), stroke);
-    painter.rect_stroke(front, egui::Rounding::same(2.0), stroke);
+    let softened = egui::Stroke::new(stroke.width, stroke.color.gamma_multiply(0.88));
+    let size = egui::vec2(rect.width() * 0.42, rect.height() * 0.46);
+    let back = egui::Rect::from_center_size(rect.center() + egui::vec2(-1.8, -1.6), size);
+    let front = egui::Rect::from_center_size(rect.center() + egui::vec2(1.2, 1.0), size);
+    painter.rect_stroke(back, egui::Rounding::same(1.5), softened);
+    painter.rect_stroke(front, egui::Rounding::same(1.5), softened);
+    painter.line_segment(
+        [
+            egui::pos2(front.left(), front.top()),
+            egui::pos2(front.right(), front.top()),
+        ],
+        egui::Stroke::new(softened.width * 0.8, softened.color.gamma_multiply(0.55)),
+    );
 }
 
 fn paint_settings_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
@@ -2132,7 +2596,7 @@ fn editor_resize_row(
 ) {
     if let Some(helper_text) = helper_text {
         ui.label(muted_label(helper_text, theme.weak_text_color));
-        ui.add_space(4.0);
+        ui.add_space(1.0);
         editor_resize_handle(ui, theme, height, min_height, max_height);
     } else {
         editor_resize_handle(ui, theme, height, min_height, max_height);
@@ -2141,12 +2605,42 @@ fn editor_resize_row(
 
 fn editor_resize_handle(
     ui: &mut egui::Ui,
-    _theme: &ResolvedTheme,
-    _height: &mut f32,
-    _min_height: f32,
-    _max_height: f32,
+    theme: &ResolvedTheme,
+    height: &mut f32,
+    min_height: f32,
+    max_height: f32,
 ) {
-    ui.add_space(2.0);
+    ui.add_space(1.0);
+
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 10.0),
+        egui::Sense::click_and_drag(),
+    );
+    let is_active = response.hovered() || response.dragged();
+    if is_active {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+
+    if response.dragged() {
+        *height = (*height + ui.input(|i| i.pointer.delta().y)).clamp(min_height, max_height);
+        ui.ctx().request_repaint();
+    }
+
+    let stroke_color = if response.dragged() {
+        theme.accent_color
+    } else if response.hovered() {
+        theme.border_color.gamma_multiply(0.85)
+    } else {
+        theme.border_color.gamma_multiply(0.55)
+    };
+    let handle_width = rect.width().min(42.0);
+    let handle_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(handle_width, 3.0));
+    ui.painter().rect(
+        handle_rect,
+        egui::Rounding::same(999.0),
+        stroke_color.gamma_multiply(if is_active { 0.24 } else { 0.18 }),
+        egui::Stroke::new(1.0, stroke_color),
+    );
 }
 
 fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -> egui::Frame {
@@ -2164,7 +2658,7 @@ fn card_frame(ctx: &egui::Context, fill: egui::Color32, stroke: egui::Color32) -
                 10
             }),
         })
-        .inner_margin(egui::Margin::same(10.0))
+        .inner_margin(egui::Margin::same(11.0))
 }
 
 fn settings_panel_frame(
@@ -2188,9 +2682,9 @@ fn settings_panel_frame(
         })
         .inner_margin(egui::Margin {
             left: 16.0,
-            right: 10.0,
-            top: 10.0,
-            bottom: 10.0,
+            right: 12.0,
+            top: 11.0,
+            bottom: 11.0,
         })
 }
 
@@ -2209,7 +2703,7 @@ fn input_frame(ctx: &egui::Context, fill: egui::Color32) -> egui::Frame {
                 4
             }),
         })
-        .inner_margin(egui::Margin::same(8.0))
+        .inner_margin(egui::Margin::same(9.0))
 }
 
 fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -2246,6 +2740,10 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
+                render_startup_settings_section(app, ui);
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
                 render_general_settings_section(app, ctx, ui);
                 ui.add_space(12.0);
                 ui.separator();
@@ -2279,6 +2777,24 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
     });
 }
 
+fn render_startup_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
+    egui::CollapsingHeader::new(
+        egui::RichText::new(app.tr("settings.health"))
+            .color(app.theme.text_color)
+            .strong(),
+    )
+    .id_source("settings_startup_health")
+    .default_open(false)
+    .show(ui, |ui| {
+        render_startup_health_section(app, ui);
+
+        if app.config.loaded_from.is_none() {
+            ui.add_space(12.0);
+            render_first_run_setup_section(app, ui);
+        }
+    });
+}
+
 fn render_update_status(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     match &app.release_check_state {
         ReleaseCheckState::Checking => {
@@ -2300,28 +2816,74 @@ fn render_update_status(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui
             );
         }
         ReleaseCheckState::UpdateAvailable(release) => {
-            ui.horizontal(|ui| {
+            let guide = update::current_platform_update_guide();
+            ui.vertical(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(app.tr_with(
+                            "settings.update_available",
+                            &[("version", release.version.clone())],
+                        ))
+                        .small()
+                        .color(app.theme.accent_color),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(app.tr_with(
+                            "settings.update_guided_platform",
+                            &[("platform", guide.platform_label.clone())],
+                        ))
+                        .small()
+                        .color(app.theme.weak_text_color),
+                    );
+                });
+                ui.add_space(2.0);
                 ui.label(
-                    egui::RichText::new(app.tr_with(
-                        "settings.update_available",
-                        &[("version", release.version.clone())],
-                    ))
-                    .small()
-                    .color(app.theme.accent_color),
+                    egui::RichText::new(guide.detail.clone())
+                        .small()
+                        .color(app.theme.weak_text_color),
                 );
-                if ui
-                    .add(icon_action_button_sized(
-                        app,
-                        ToolbarIcon::Update,
-                        app.theme.accent_color,
-                        app.theme.accent_text_color,
-                        egui::vec2(20.0, 20.0),
-                    ))
-                    .on_hover_text(app.tr("settings.update_open_download"))
-                    .clicked()
-                {
-                    open_url(ctx, release.release_url.clone());
-                }
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add(icon_action_button_sized(
+                            app,
+                            ToolbarIcon::Update,
+                            app.theme.accent_color,
+                            app.theme.accent_text_color,
+                            egui::vec2(20.0, 20.0),
+                        ))
+                        .on_hover_text(app.tr("settings.update_open_download"))
+                        .clicked()
+                    {
+                        open_url(ctx, release.release_url.clone());
+                    }
+
+                    match &guide.action {
+                        UpdateAction::CopyCommand { command } => {
+                            if ui
+                                .add(secondary_action_button(
+                                    &app.tr("settings.update_copy_command"),
+                                    app.theme.panel_fill_soft,
+                                ))
+                                .clicked()
+                            {
+                                copy_text_to_clipboard(command);
+                            }
+                        }
+                        UpdateAction::OpenReleasePage => {
+                            if ui
+                                .add(secondary_action_button(
+                                    &app.tr("settings.update_open_release_page"),
+                                    app.theme.panel_fill_soft,
+                                ))
+                                .clicked()
+                            {
+                                open_url(ctx, release.release_url.clone());
+                            }
+                        }
+                    }
+                });
             });
         }
         ReleaseCheckState::Error(error) => {
@@ -2840,6 +3402,7 @@ fn settings_model_field(
 
     if let Some(error) = &state.last_error {
         ui.label(egui::RichText::new(error).small().color(theme.danger_color));
+        ui.label(muted_label(models_hint_label, theme.weak_text_color));
     }
 
     (changed, should_fetch)
@@ -3132,6 +3695,7 @@ fn history_entry_card(
     select_label: &str,
     prompt_label: &str,
     response_label: &str,
+    selectable: bool,
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     theme: &ResolvedTheme,
@@ -3146,16 +3710,18 @@ fn history_entry_card(
     let entry_id = history::entry_id(entry);
     card_frame(ctx, theme.panel_fill_raised, theme.border_color).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            let mut is_selected = selected_history_entries.contains(&entry_id);
-            if ui
-                .checkbox(&mut is_selected, "")
-                .on_hover_text(select_label)
-                .changed()
-            {
-                if is_selected {
-                    selected_history_entries.insert(entry_id.clone());
-                } else {
-                    selected_history_entries.remove(&entry_id);
+            if selectable {
+                let mut is_selected = selected_history_entries.contains(&entry_id);
+                if ui
+                    .checkbox(&mut is_selected, "")
+                    .on_hover_text(select_label)
+                    .changed()
+                {
+                    if is_selected {
+                        selected_history_entries.insert(entry_id.clone());
+                    } else {
+                        selected_history_entries.remove(&entry_id);
+                    }
                 }
             }
             ui.label(
@@ -3211,18 +3777,63 @@ fn history_entry_card(
     });
 }
 
+fn push_session_history_entry(
+    session_history_entries: &mut Vec<HistoryEntry>,
+    entry: HistoryEntry,
+) {
+    session_history_entries.insert(0, entry);
+    session_history_entries.truncate(SESSION_HISTORY_LIMIT);
+}
+
 fn sync_main_viewport(
     ctx: &egui::Context,
     show_history: bool,
     show_settings: bool,
     window_height: f32,
 ) {
+    let desired_size = main_viewport_min_size(show_history, show_settings, window_height);
+    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(desired_size));
+
+    if let Some(next_size) = requested_viewport_inner_size(
+        ctx.input(|i| i.viewport().inner_rect.map(|rect| rect.size())),
+        desired_size,
+    ) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(next_size));
+    }
+}
+
+fn trim_for_preview(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    let mut result = String::new();
+    for (index, ch) in trimmed.chars().enumerate() {
+        if index >= max_chars {
+            result.push_str("...");
+            return result;
+        }
+        result.push(ch);
+    }
+    result
+}
+
+fn default_prompt_editor_height(window_height: f32) -> f32 {
+    (window_height * 0.16).clamp(88.0, 136.0)
+}
+
+fn default_response_editor_height(window_height: f32) -> f32 {
+    (window_height * 0.18).clamp(96.0, 156.0)
+}
+
+fn main_viewport_min_size(
+    show_history: bool,
+    show_settings: bool,
+    window_height: f32,
+) -> egui::Vec2 {
     const BASE_MIN_WIDTH: f32 = 820.0;
-    const BASE_MIN_HEIGHT: f32 = 560.0;
+    const BASE_MIN_HEIGHT: f32 = 500.0;
     const SETTINGS_MIN_WIDTH: f32 = 1320.0;
-    const SETTINGS_MIN_HEIGHT: f32 = 640.0;
-    const HISTORY_MIN_HEIGHT: f32 = 660.0;
-    const MAX_DEFAULT_HEIGHT: f32 = 700.0;
+    const SETTINGS_MIN_HEIGHT: f32 = 600.0;
+    const HISTORY_MIN_HEIGHT: f32 = 620.0;
+    const MAX_DEFAULT_HEIGHT: f32 = 680.0;
 
     let preferred_height = window_height.clamp(BASE_MIN_HEIGHT, MAX_DEFAULT_HEIGHT);
 
@@ -3245,54 +3856,45 @@ fn sync_main_viewport(
         preferred_height
     };
 
-    let desired_size = egui::vec2(min_width, min_height);
-    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(desired_size));
+    egui::vec2(min_width, min_height)
+}
 
-    if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
-        let current_size = current_rect.size();
+fn editor_max_height(ctx: &egui::Context, min_height: f32) -> f32 {
+    let viewport_height = ctx
+        .input(|i| i.viewport().inner_rect.map(|rect| rect.height()))
+        .unwrap_or(600.0);
+    editor_max_height_for_viewport(viewport_height, min_height)
+}
+
+fn editor_max_height_for_viewport(viewport_height: f32, min_height: f32) -> f32 {
+    (viewport_height / 3.0).max(min_height)
+}
+
+fn requested_viewport_inner_size(
+    current_size: Option<egui::Vec2>,
+    desired_size: egui::Vec2,
+) -> Option<egui::Vec2> {
+    current_size.and_then(|current_size| {
         if current_size.x < desired_size.x || current_size.y < desired_size.y {
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            Some(egui::vec2(
                 current_size.x.max(desired_size.x),
                 current_size.y.max(desired_size.y),
-            )));
+            ))
+        } else {
+            None
         }
-    }
+    })
 }
 
-fn trim_for_preview(text: &str, max_chars: usize) -> String {
-    let trimmed = text.trim();
-    let mut result = String::new();
-    for (index, ch) in trimmed.chars().enumerate() {
-        if index >= max_chars {
-            result.push_str("...");
-            return result;
-        }
-        result.push(ch);
-    }
-    result
-}
-
-fn default_prompt_editor_height(window_height: f32) -> f32 {
-    (window_height * 0.31).clamp(180.0, 230.0)
-}
-
-fn default_response_editor_height(window_height: f32) -> f32 {
-    (window_height * 0.28).clamp(150.0, 210.0)
+fn section_actions_right_inset() -> f32 {
+    10.0
 }
 
 fn trim_timestamp(value: &str) -> String {
     value.replace('T', " ").replace('Z', "")
 }
 
-fn open_history_file() -> anyhow::Result<()> {
-    let path = history::history_file_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if !path.exists() {
-        std::fs::File::create(&path)?;
-    }
-
+fn open_path_in_file_manager(path: &Path) -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
@@ -3303,20 +3905,31 @@ fn open_history_file() -> anyhow::Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg(&path).spawn()?;
+        std::process::Command::new("open").arg(path).spawn()?;
         return Ok(());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        std::process::Command::new("xdg-open").arg(&path).spawn()?;
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
         return Ok(());
     }
 
     #[allow(unreachable_code)]
     Err(anyhow::anyhow!(
-        "Opening the history file is not supported on this platform"
+        "Opening files or folders in the system file manager is not supported on this platform"
     ))
+}
+
+fn open_history_file() -> anyhow::Result<()> {
+    let path = history::history_file_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if !path.exists() {
+        std::fs::File::create(&path)?;
+    }
+    open_path_in_file_manager(&path)
 }
 
 fn get_primary_selection() -> Result<String, String> {
@@ -3393,8 +4006,8 @@ fn build_style(theme: &ResolvedTheme) -> egui::Style {
     visuals.widgets.open = visuals.widgets.inactive;
 
     style.visuals = visuals;
-    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-    style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style.spacing.item_spacing = egui::vec2(8.0, 9.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.5);
     style.spacing.window_margin = egui::Margin::same(12.0);
     style.spacing.indent = 10.0;
     style.spacing.scroll = egui::style::ScrollStyle {
@@ -3508,6 +4121,281 @@ mod tests {
             true,
             "before",
             "before pasted text",
+        ));
+    }
+
+    #[test]
+    fn push_session_history_entry_keeps_newest_first_and_caps_length() {
+        let mut session_history_entries = Vec::new();
+
+        for index in 0..(SESSION_HISTORY_LIMIT + 3) {
+            push_session_history_entry(
+                &mut session_history_entries,
+                HistoryEntry {
+                    created_at: format!("2026-03-20T00:00:{index:02}Z"),
+                    backend: "ollama".to_string(),
+                    prompt: format!("prompt-{index}"),
+                    response: format!("response-{index}"),
+                },
+            );
+        }
+
+        assert_eq!(session_history_entries.len(), SESSION_HISTORY_LIMIT);
+        assert_eq!(
+            session_history_entries[0].prompt,
+            format!("prompt-{}", SESSION_HISTORY_LIMIT + 2)
+        );
+        assert_eq!(session_history_entries.last().unwrap().prompt, "prompt-3");
+    }
+
+    #[test]
+    fn editor_max_height_stays_within_a_third_of_the_viewport() {
+        assert_eq!(editor_max_height_for_viewport(900.0, 96.0), 300.0);
+        assert_eq!(editor_max_height_for_viewport(1200.0, 84.0), 400.0);
+    }
+
+    #[test]
+    fn editor_max_height_respects_minimum_when_viewport_is_small() {
+        assert_eq!(editor_max_height_for_viewport(240.0, 96.0), 96.0);
+        assert_eq!(editor_max_height_for_viewport(180.0, 84.0), 84.0);
+    }
+
+    #[test]
+    fn default_editor_heights_use_compact_startup_sizes() {
+        assert!((default_prompt_editor_height(600.0) - 96.0).abs() < f32::EPSILON);
+        assert!((default_response_editor_height(600.0) - 108.0).abs() < 0.001);
+        assert!((default_prompt_editor_height(1200.0) - 136.0).abs() < f32::EPSILON);
+        assert!((default_response_editor_height(1200.0) - 156.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn main_viewport_min_size_respects_base_history_and_settings_modes() {
+        assert_eq!(
+            main_viewport_min_size(false, false, 540.0),
+            egui::vec2(820.0, 540.0)
+        );
+        assert_eq!(
+            main_viewport_min_size(true, false, 540.0),
+            egui::vec2(820.0, 620.0)
+        );
+        assert_eq!(
+            main_viewport_min_size(false, true, 540.0),
+            egui::vec2(1320.0, 600.0)
+        );
+        assert_eq!(
+            main_viewport_min_size(true, true, 540.0),
+            egui::vec2(1320.0, 620.0)
+        );
+    }
+
+    #[test]
+    fn main_viewport_min_size_clamps_extreme_heights() {
+        assert_eq!(
+            main_viewport_min_size(false, false, 320.0),
+            egui::vec2(820.0, 500.0)
+        );
+        assert_eq!(
+            main_viewport_min_size(false, false, 900.0),
+            egui::vec2(820.0, 680.0)
+        );
+        assert_eq!(
+            main_viewport_min_size(true, true, 900.0),
+            egui::vec2(1320.0, 680.0)
+        );
+    }
+
+    #[test]
+    fn requested_viewport_inner_size_expands_only_smaller_axes() {
+        let desired_size = egui::vec2(820.0, 620.0);
+
+        assert_eq!(
+            requested_viewport_inner_size(Some(egui::vec2(640.0, 700.0)), desired_size),
+            Some(egui::vec2(820.0, 700.0))
+        );
+        assert_eq!(
+            requested_viewport_inner_size(Some(egui::vec2(900.0, 540.0)), desired_size),
+            Some(egui::vec2(900.0, 620.0))
+        );
+        assert_eq!(
+            requested_viewport_inner_size(Some(egui::vec2(900.0, 700.0)), desired_size),
+            None
+        );
+        assert_eq!(requested_viewport_inner_size(None, desired_size), None);
+    }
+
+    #[derive(Debug)]
+    struct VisualLayoutState {
+        name: &'static str,
+        window_height: f32,
+        show_history: bool,
+        show_settings: bool,
+        session_history_entries: usize,
+        attachments: usize,
+        dictation_status: bool,
+        attachment_notice: bool,
+        attachment_error: bool,
+        settings_notice: bool,
+        settings_error: bool,
+        current_inner_size: Option<egui::Vec2>,
+    }
+
+    fn format_vec2(value: egui::Vec2) -> String {
+        format!("{:.0}x{:.0}", value.x, value.y)
+    }
+
+    fn format_optional_vec2(value: Option<egui::Vec2>) -> String {
+        value.map(format_vec2).unwrap_or_else(|| "none".to_string())
+    }
+
+    fn visual_layout_snapshot(state: &VisualLayoutState) -> String {
+        let min_inner_size =
+            main_viewport_min_size(state.show_history, state.show_settings, state.window_height);
+        let prompt_default = default_prompt_editor_height(state.window_height);
+        let response_default = default_response_editor_height(state.window_height);
+        let prompt_max = editor_max_height_for_viewport(state.window_height, 88.0);
+        let response_max = editor_max_height_for_viewport(state.window_height, 84.0);
+        let requested_inner_size =
+            requested_viewport_inner_size(state.current_inner_size, min_inner_size);
+
+        format!(
+            "{name}\n  min_inner={min_inner}\n  requested_inner={requested_inner}\n  prompt_default={prompt_default:.1}\n  response_default={response_default:.1}\n  prompt_max={prompt_max:.1}\n  response_max={response_max:.1}\n  startup_health=false\n  first_run_setup=false\n  status_section={status}\n  session_history={session_history}\n  saved_history={saved_history}\n  toolbar_right_inset=10.0\n",
+            name = state.name,
+            min_inner = format_vec2(min_inner_size),
+            requested_inner = format_optional_vec2(requested_inner_size),
+            status = status_section_has_content_state(
+                state.attachments > 0,
+                state.dictation_status,
+                state.attachment_notice,
+                state.attachment_error,
+                state.settings_notice,
+                state.settings_error,
+            ),
+            session_history = state.session_history_entries > 0,
+            saved_history = state.show_history,
+            prompt_default = prompt_default,
+            response_default = response_default,
+            prompt_max = prompt_max,
+            response_max = response_max,
+        )
+    }
+
+    #[test]
+    fn visual_layout_snapshot_matrix_matches_expected_summary() {
+        let actual = [
+            visual_layout_snapshot(&VisualLayoutState {
+                name: "startup_compact",
+                window_height: 540.0,
+                show_history: false,
+                show_settings: false,
+                session_history_entries: 0,
+                attachments: 0,
+                dictation_status: false,
+                attachment_notice: false,
+                attachment_error: false,
+                settings_notice: false,
+                settings_error: false,
+                current_inner_size: Some(egui::vec2(640.0, 520.0)),
+            }),
+            visual_layout_snapshot(&VisualLayoutState {
+                name: "settings_open",
+                window_height: 540.0,
+                show_history: false,
+                show_settings: true,
+                session_history_entries: 0,
+                attachments: 0,
+                dictation_status: false,
+                attachment_notice: false,
+                attachment_error: false,
+                settings_notice: false,
+                settings_error: false,
+                current_inner_size: Some(egui::vec2(1200.0, 560.0)),
+            }),
+            visual_layout_snapshot(&VisualLayoutState {
+                name: "history_open_with_feedback",
+                window_height: 700.0,
+                show_history: true,
+                show_settings: false,
+                session_history_entries: 3,
+                attachments: 1,
+                dictation_status: true,
+                attachment_notice: false,
+                attachment_error: false,
+                settings_notice: false,
+                settings_error: true,
+                current_inner_size: Some(egui::vec2(780.0, 610.0)),
+            }),
+        ]
+        .join("\n");
+
+        let expected = "\
+startup_compact
+  min_inner=820x540
+  requested_inner=820x540
+  prompt_default=88.0
+  response_default=97.2
+  prompt_max=180.0
+  response_max=180.0
+  startup_health=false
+  first_run_setup=false
+  status_section=false
+  session_history=false
+  saved_history=false
+  toolbar_right_inset=10.0
+
+settings_open
+  min_inner=1320x600
+  requested_inner=1320x600
+  prompt_default=88.0
+  response_default=97.2
+  prompt_max=180.0
+  response_max=180.0
+  startup_health=false
+  first_run_setup=false
+  status_section=false
+  session_history=false
+  saved_history=false
+  toolbar_right_inset=10.0
+
+history_open_with_feedback
+  min_inner=820x680
+  requested_inner=820x680
+  prompt_default=112.0
+  response_default=126.0
+  prompt_max=233.3
+  response_max=233.3
+  startup_health=false
+  first_run_setup=false
+  status_section=true
+  session_history=true
+  saved_history=true
+  toolbar_right_inset=10.0
+";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn status_section_visibility_reacts_to_any_message_or_error_state() {
+        assert!(!status_section_has_content_state(
+            false, false, false, false, false, false
+        ));
+        assert!(status_section_has_content_state(
+            true, false, false, false, false, false
+        ));
+        assert!(status_section_has_content_state(
+            false, true, false, false, false, false
+        ));
+        assert!(status_section_has_content_state(
+            false, false, true, false, false, false
+        ));
+        assert!(status_section_has_content_state(
+            false, false, false, true, false, false
+        ));
+        assert!(status_section_has_content_state(
+            false, false, false, false, true, false
+        ));
+        assert!(status_section_has_content_state(
+            false, false, false, false, false, true
         ));
     }
 }

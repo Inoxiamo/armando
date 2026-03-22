@@ -6,6 +6,7 @@
 - Support for `ollama`, `chatgpt`, `gemini`, and `claude` backends
 - Centralized YAML configuration
 - External prompt preset files with built-in defaults, user overrides, and legacy alias fallback
+- Bundled first-run config templates plus reusable `default`, `local`, `work`, `personal`, and `beta` profiles under `configs/`
 - Automatic selected-text capture
 - Prompt presets and language tags for contextual workflows
 - Copy-to-clipboard for responses
@@ -14,6 +15,13 @@
 - UI localization loaded from external YAML files
 - Settings panel with real-time persistence for theme, language, backend, models, and credentials
 - Build version displayed in the settings panel
+- In-app GitHub release check with version comparison against the latest published release
+- Settings footer shortcut that opens the latest downloadable GitHub release when an update is available
+- Settings footer also exposes a Linux/macOS bootstrap shortcut so guided updates can skip the manual archive step
+- Startup diagnostics are available from a collapsed section in settings, keeping the main popup minimal while still exposing config source, selected backend readiness, and optional tool availability
+- Startup health rows now include short recovery hints so missing config, backend selection, dictation tools, and clipboard helpers point to the next action
+- First-run startup now falls back to bundled defaults when no config file exists and shows a compact setup card with create/open actions for the writable config directory
+- First-run setup can now seed the writable config from a bundled template/profile and keeps the template choice visible in the onboarding card
 - Active `NERV HUD` theme with revised palette
 - Compatibility preserved for legacy theme names `nerv-magi-system` and `magi`
 - Unified dropdown styling across the main popup, settings panel, and history filter
@@ -21,10 +29,12 @@
 - Project icon integrated both in the native viewport and in the local desktop installation assets
 - Prompt preparation optimized for cleanup, rewriting, translation, and text adaptation
 - Prompt preparation now loads text-assist presets from `prompt-tags.yaml` and generic presets from `generic-prompts.yaml`
+- Active window context is now collected on a best-effort basis and injected into backend prompt preparation only as a lightweight hint
 - Explicit language tags are handled centrally and support a broad set of aliases and full language names
 - UI toggle between text-assist mode and generic-question mode
 - Optional checkbox to keep an in-memory chat session inside the current popup run
 - Optional local history, disabled by default and enabled only on user request
+- Session history now stays in memory only, while saved history is clearly separated in the UI and on disk
 - Optional debug logging for requests and errors, disabled by default and intended only for diagnostics
 - Provider settings can load the currently available models from the backend API or local Ollama server and let the user pick them from a dropdown
 - Provider settings show a residual-credit indicator, with `∞` for Ollama and `n/d` for cloud providers that do not expose reliable balance data here
@@ -32,14 +42,19 @@
 - Prompt and response editors can now be resized directly with the mouse by dragging their lower edge
 - Provider configuration sections are closed by default in settings, including the Ollama URL/model section
 - The settings panel version label now lives in the footer instead of consuming space at the top of the panel
+- Release bundles can now be installed or refreshed through a thin Linux/macOS bootstrap wrapper that downloads the matching artifact and delegates to the bundled installer
+- The bootstrap wrapper now has dry-run regression coverage for both Linux and macOS target resolution, without needing network access
+- Ollama now supports progressive response chunk delivery to the UI, so local generations can render incrementally instead of waiting only for the final payload
 - Image attachments from file picker
 - Screenshot/image paste from clipboard
 - Voice dictation flow with microphone recording and OpenAI transcription
 - Multimodal request forwarding for ChatGPT, Claude, Gemini, and Ollama image-capable models
 - Regression-oriented unit tests for prompt preparation, tag parsing, history retention, config loading, and theme loading
+- Fault-injection tests for backend model lookup and response parsing now cover HTTP error bodies, malformed payloads, and empty compatible-model lists
 - Integration tests for config round-trips, resource discovery, and release bundle/install scripts
 - Containerized Linux test runner for formatting, unit tests, integration tests, functional packaging checks, and Linux release bundle generation
 - Persistent local history with 7-day retention
+- Session-only history kept separate from saved history, with copy/reuse actions but no disk-backed delete/select affordances
 - History filters by backend and text
 - Fast reuse and copy actions from history entries
 - Multi-select and deletion for history entries
@@ -60,9 +75,16 @@
 - Ollama shows infinite local availability, while cloud backends currently surface `n/d` because this app cannot read a dependable remaining-credit balance from those providers
 - The Ollama base URL remains editable in settings and changing it invalidates the cached model list so the next refresh reads from the new server
 - Opening the settings panel now expands the viewport width when needed so the main prompt/response preview does not get squeezed into a broken narrow layout
+- The settings footer checks the latest GitHub release in the background and shows an update shortcut only when that release is newer than the local build
+- Saving settings now reports the target config path on failure, which makes permission and disk-space recovery clearer
 - Prompt actions are grouped directly in the prompt header, while copy/history controls are grouped in the response header for a shorter interaction path
 - Toolbar actions now use embedded SVG icons for the main controls so they stay visible and more polished without relying on emoji or font fallback
 - Toolbar SVG icons are now rasterized against the current `pixels_per_point` scale and refreshed when the viewport scale changes so they stay crisp on HiDPI displays
+- Startup health and first-run setup now live inside settings instead of the main popup, preserving a minimal default UI while keeping the recovery actions available on demand
+- Active window context is captured best-effort from the current platform or from `ARMANDO_ACTIVE_WINDOW_CONTEXT`, then passed to prompt preparation only as a non-binding hint
+- Response streaming is currently wired end-to-end for Ollama only; the UI can already consume progressive chunks while the cloud backends still complete in single-shot mode
+- Prompt and response editors now reserve an explicit rendered height instead of relying only on desired row count, so drag-resize limits are actually enforced
+- Prompt and response editor growth is capped to about one third of the current viewport height, while still allowing manual shrink with the mouse
 - Pasting into the prompt with `Ctrl+V` or `Cmd+V` now also auto-attaches an image when the clipboard contains one, while normal text paste continues to work as usual
 - Clipboard image paste now also falls back to local image paths or `file://` image URIs copied from other apps when direct bitmap clipboard data is unavailable
 - History reloads when enabled, when the panel is opened, and after every successful response
@@ -76,6 +98,8 @@
 - Local installation places the binary, shipped themes, shipped locales, desktop icon, and `.desktop` launcher entry in the user profile
 - Local and release installers now preserve existing prompt preset files unless `FORCE_CONFIG_INSTALL=1` is set
 - Downloaded GitHub release bundles now include bundled assets, install scripts, and checksums so other users can extract and install them directly
+- Linux and macOS can also use a bootstrap script that resolves the correct release artifact, downloads it to a temporary directory, optionally verifies its checksum, and then runs the bundle's `scripts/install.sh`
+- The update footer now distinguishes the direct release link from the bootstrap shortcut, so users can choose the guided route or the manual archive route
 - GitHub Actions now validate the Linux flow in Docker before release packaging and upload both test logs and Linux bundle artifacts
 - Default assistant behavior prefers output that can be reapplied immediately
 - In text-assist mode, style/context tags come from external preset files, while language fallback is applied once globally unless an explicit language tag is present
@@ -86,22 +110,23 @@
 
 ## Known Gaps
 
-- No token-by-token streaming yet
-- No startup-time visual diagnostics for backend/config health
-- No distinction yet between session-only history and persistent history
+- Streaming is not universal yet; Ollama streams progressively, while ChatGPT, Claude, and Gemini still complete in single-shot mode
 - No automated UI tests for layout, scrolling, and popup interactions
+- No pixel-level validation yet for `egui` layout behavior across DPI scales, desktop environments, and maximized windows
 - No safe terminal or MCP tool integration yet
+- No silent in-place auto-update yet; updates remain explicit and guided through release downloads and installers
 - Window icon visibility may still vary by desktop environment even when the app id and desktop entry are aligned
 - Voice dictation currently depends on system audio capture tools and an OpenAI API key for transcription
 - Image support depends on the selected backend model actually being vision-capable
 - Debug logging may capture sensitive request content and should stay disabled unless actively troubleshooting
 - Local history stores prompts and responses on disk and should stay disabled unless the user explicitly wants that archive
+- Bundled config profiles are intentionally small and opinionated; they are a base for onboarding, not a full profile-management UI yet, and now cover both daily-use and experimental starting points
 - Remaining cloud credits are shown as unavailable metadata rather than a real numeric balance because the current provider integrations do not expose a stable shared balance endpoint here
+- The guided release bootstrap path is covered by cross-platform dry-run tests, but the installer scripts still rely on shell tooling being present on the host system
 
 ## Immediate Priorities
 
-- Finalize cross-platform release notes and install guidance for tagged GitHub releases
-- Add clearer diagnostics for backend health, missing tools, and first-run setup
 - Continue refining the compact toolbar language and the `NERV HUD` visual pass
-- Separate session-only context from persisted history more explicitly
+- Add higher-confidence UI regression coverage for editor sizing, viewport changes, and layout edge cases
 - Evaluate a beta tools mode for terminal/CLI/MCP behind explicit confirmation
+- Harden and document the guided release update path across all supported platforms

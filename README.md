@@ -14,16 +14,21 @@ It stays close to your workflow so you can ask questions, rewrite text, attach i
 - Image attachments, clipboard image paste, and voice dictation
 - Release bundles for Linux, macOS, and Windows
 
+## Development Approach
+
+This repository is developed in a vibe-coding style, with fast iterative changes, but every change still goes through automated validation plus a double human check before any push: one review by the person or agent implementing the change, and a second human review at the parent/final check stage.
+
 ## Get armando
 
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>
 - All releases: <https://github.com/Inoxiamo/armando/releases>
 
-Start with [`INSTALL.md`](INSTALL.md) for the release download, OS-specific install steps, config paths, and first-run setup.
+Start with [`INSTALL.md`](INSTALL.md) for the release download, OS-specific install steps, config paths, and first-run setup. The first-run card can also seed a new config from one of the bundled templates in `configs/`.
 
 ## Configure It
 
 The repository ships defaults under [`configs/`](configs), [`themes/`](themes), [`locales/`](locales), plus [`prompt-tags.yaml`](prompt-tags.yaml) and [`generic-prompts.yaml`](generic-prompts.yaml).
+`configs/` now doubles as a small set of reusable config templates for first-run setup, so the initial profile can start from a known-good base instead of an empty file. The bundled set currently includes `default`, `local`, `work`, `personal`, and `beta`.
 After installation, `armando` reads configuration from the platform-standard config directory for `armando`, with this structure:
 
 ```text
@@ -32,6 +37,10 @@ armando/
   generic-prompts.yaml
   configs/
     default.yaml
+    local.yaml
+    work.yaml
+    personal.yaml
+    beta.yaml
   themes/
     my-theme.yaml
   locales/
@@ -50,6 +59,28 @@ ui:
 ```
 
 When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
+
+## What The App Can Do
+
+- Rewrite, clean up, summarize, translate, and reformat selected text in a popup without leaving the current workflow
+- Switch between `Text assist` for rewriting existing text and `Generic question` for direct prompting
+- Use `ollama`, `chatgpt`, `gemini`, or `claude` as the active backend
+- Attach images from the file picker, paste screenshots from the clipboard, and use voice dictation
+- Keep an in-memory chat session for follow-up turns without forcing persistent history on disk
+- Save optional local history, then filter, copy, reuse, multi-select, and delete saved entries
+- Change theme, language, backend, models, and credentials from the settings panel with live persistence
+- Load provider model lists from backend APIs or a local Ollama instance and pick them from dropdowns
+- See startup diagnostics, backend readiness, and recovery hints directly in settings
+- Check for newer GitHub releases from the app and open the right update path for the current platform
+- Start from bundled config profiles such as `default`, `local`, `work`, `personal`, and `beta`
+
+## Planned
+
+- MCP integration for safe external tools and richer runtime context
+- RAG support for retrieving project docs, notes, and release context before larger changes
+- Agent-oriented workflow improvements with clearer delegation, recap, and push-gating rules
+- Beta tools panel for terminal, CLI, MCP, and backend-status visibility
+- Safer command execution flow with explicit confirmation for sensitive actions
 
 ## Prompt Presets
 
@@ -85,6 +116,70 @@ If no explicit language tag is provided, `armando` keeps the language of the sou
 
 The old `aliases` section in the main config is still supported as a legacy fallback, but new presets should go into the dedicated files.
 
+### Customize Preprompts
+
+The fastest way to adapt `armando` to your workflow is to customize the prompt preset files.
+
+Use `prompt-tags.yaml` for rewrite-oriented tags that modify how an existing text should be transformed:
+
+```yaml
+tags:
+  FORMAL: "Rewrite the result in a formal and polished tone."
+  BUGFIX: "Focus on actionable technical corrections and keep the output precise."
+  SHORT: "Keep the final result short and concise."
+```
+
+Use `generic-prompts.yaml` for direct-question presets that should inject a reusable instruction block:
+
+```yaml
+tags:
+  ARCH:
+    instruction: "Answer like a pragmatic software architect. Prefer tradeoffs, constraints, and implementation steps."
+    strip_header: false
+```
+
+This lets you build your own preprompt library for recurring work such as email cleanup, technical rewriting, architecture questions, translation, documentation polish, or shell-command generation.
+
+### Automatic Formatting And Cleanup
+
+In `Text assist` mode, `armando` is designed for quick text transformation rather than raw chat. A typical flow is:
+
+1. paste or auto-capture the source text
+2. add one or more tags such as `EMAIL`, `FORMAL`, `SHORT`, or a custom preset
+3. send the request and copy the cleaned result back where you need it
+
+This is the best place to show automatic formatting examples in the documentation, because the app can turn rough notes into a cleaner email, normalize bullet points, tighten wording, or adapt tone and language in one step.
+
+![Text Assist Auto Format](docs/media/text-assist-auto-format.png)
+
+### How To Use `CMD`
+
+`CMD` is available in the generic prompt presets and is meant for command-style answers.
+
+Use it in `Generic question` mode when you want only the final shell command or one-liner, without Markdown or explanation. Example prompt:
+
+```text
+CMD: find all .log files larger than 100MB under /var/log and sort them by size
+```
+
+Expected behavior: the assistant returns just the command, ready to copy into a terminal.
+
+Without `CMD`, the same request can return a normal explanatory answer in Markdown. With `CMD`, the preset pushes the backend toward a direct command-only output.
+
+![Generic Question CMD](docs/media/generic-question-cmd.png)
+
+## Settings And Diagnostics
+
+The settings panel centralizes the most important runtime controls and checks:
+
+- active backend selection
+- model selection and provider-specific settings
+- language and theme preferences
+- startup diagnostics and recovery hints
+- update status and runtime configuration feedback
+
+![Settings Diagnostics](docs/media/settings-diagnostics.png)
+
 ## Keyboard Shortcuts
 
 System-level shortcuts are supported on Linux, macOS, and Windows.
@@ -97,6 +192,7 @@ Use [`SHORTCUTS.md`](SHORTCUTS.md) for the practical setup steps.
 - Install and first setup: [`INSTALL.md`](INSTALL.md)
 - Keyboard shortcuts: [`SHORTCUTS.md`](SHORTCUTS.md)
 - Releases, versions, and artifacts: [`RELEASES.md`](RELEASES.md)
+- Visual regression checklist: [`VISUAL_REGRESSION.md`](VISUAL_REGRESSION.md)
 - Repository map: [`STRUCTURE.md`](STRUCTURE.md)
 
 ## Local Validation

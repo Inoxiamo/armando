@@ -7,6 +7,8 @@ use crate::config::Config;
 use crate::history;
 use crate::logging;
 use crate::prompt_profiles::PromptProfiles;
+use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +30,7 @@ pub struct QueryInput {
     pub prompt: String,
     pub images: Vec<ImageAttachment>,
     pub conversation: Vec<ConversationTurn>,
+    pub active_window_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,12 +54,20 @@ pub struct HealthCheck {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponseProgress {
+    Chunk(String),
+}
+
+pub type ResponseProgressSink = Arc<dyn Fn(ResponseProgress) + Send + Sync>;
+
 pub async fn query(
     backend: &str,
     input: &QueryInput,
     config: &Config,
     prompt_profiles: &PromptProfiles,
     mode: PromptMode,
+    progress: Option<ResponseProgressSink>,
 ) -> String {
     logging::log_request(config, backend, input);
     let prepared_prompt = prepare_prompt(
@@ -65,12 +76,13 @@ pub async fn query(
         prompt_profiles,
         mode,
         !input.images.is_empty(),
+        input.active_window_context.as_deref(),
     );
     let res = match backend {
         "chatgpt" => chatgpt::query(&prepared_prompt, &input.images, config).await,
         "claude" => claude::query(&prepared_prompt, &input.images, config).await,
         "gemini" => gemini::query(&prepared_prompt, &input.images, config).await,
-        "ollama" => ollama::query(&prepared_prompt, &input.images, config).await,
+        "ollama" => ollama::query(&prepared_prompt, &input.images, config, progress).await,
         _ => return format!("❌ Unknown backend: {backend}"),
     };
 
@@ -107,6 +119,19 @@ pub fn health_checks(config: &Config) -> Vec<HealthCheck> {
     ]
 }
 
+pub fn startup_health_checks(config: &Config, selected_backend: &str) -> Vec<HealthCheck> {
+    let provider_health_checks = health_checks(config);
+    vec![
+        startup_config_health_check(config),
+        startup_selected_backend_health_check(selected_backend, &provider_health_checks),
+        startup_dictation_tools_health_check_for(
+            command_exists("ffmpeg"),
+            command_exists("arecord"),
+        ),
+        startup_clipboard_tools_health_check(),
+    ]
+}
+
 pub async fn fetch_available_models(backend: &str, config: &Config) -> Result<Vec<String>, String> {
     match backend {
         "chatgpt" => fetch_openai_models(config).await,
@@ -126,7 +151,7 @@ fn health_check_openai(config: &Config) -> HealthCheck {
                 warning(
                     "chatgpt",
                     "Model missing",
-                    "OpenAI API key is set, but the model field is empty.",
+                    "Open Settings, fill `chatgpt.model`, then click Refresh on the model field.",
                 )
             } else {
                 ok(
@@ -139,12 +164,12 @@ fn health_check_openai(config: &Config) -> HealthCheck {
         Some(_) => error(
             "chatgpt",
             "API key missing",
-            "Configure `chatgpt.api_key` to enable OpenAI requests.",
+            "Open Settings, add `chatgpt.api_key`, then click Refresh or retry the request.",
         ),
         None => warning(
             "chatgpt",
             "Not configured",
-            "No `chatgpt` section found in config.",
+            "Add a `chatgpt` section to the config or switch to another backend in the top bar.",
         ),
     }
 }
@@ -158,7 +183,7 @@ fn health_check_claude(config: &Config) -> HealthCheck {
                 warning(
                     "claude",
                     "Model missing",
-                    "Anthropic API key is set, but the model field is empty.",
+                    "Open Settings, fill `claude.model`, then click Refresh on the model field.",
                 )
             } else {
                 ok(
@@ -171,12 +196,12 @@ fn health_check_claude(config: &Config) -> HealthCheck {
         Some(_) => error(
             "claude",
             "API key missing",
-            "Configure `claude.api_key` to enable Anthropic requests.",
+            "Open Settings, add `claude.api_key`, then click Refresh or retry the request.",
         ),
         None => warning(
             "claude",
             "Not configured",
-            "No `claude` section found in config.",
+            "Add a `claude` section to the config or switch to another backend in the top bar.",
         ),
     }
 }
@@ -188,7 +213,7 @@ fn health_check_gemini(config: &Config) -> HealthCheck {
                 warning(
                     "gemini",
                     "Model missing",
-                    "Gemini API key is set, but the model field is empty.",
+                    "Open Settings, fill `gemini.model`, then click Refresh on the model field.",
                 )
             } else {
                 ok(
@@ -201,12 +226,12 @@ fn health_check_gemini(config: &Config) -> HealthCheck {
         Some(_) => error(
             "gemini",
             "API key missing",
-            "Configure `gemini.api_key` to enable Gemini requests.",
+            "Open Settings, add `gemini.api_key`, then click Refresh or retry the request.",
         ),
         None => warning(
             "gemini",
             "Not configured",
-            "No `gemini` section found in config.",
+            "Add a `gemini` section to the config or switch to another backend in the top bar.",
         ),
     }
 }
@@ -218,13 +243,13 @@ fn health_check_ollama(config: &Config) -> HealthCheck {
                 error(
                     "ollama",
                     "Base URL missing",
-                    "Configure `ollama.base_url` to reach the Ollama server.",
+                    "Open Settings, fill `ollama.base_url`, then click Refresh to reach the server.",
                 )
             } else if ollama.model.trim().is_empty() {
                 warning(
                     "ollama",
                     "Model missing",
-                    "Ollama base URL is set, but the model field is empty.",
+                    "Open Settings, fill `ollama.model`, then click Refresh to verify the model list.",
                 )
             } else {
                 ok(
@@ -240,7 +265,7 @@ fn health_check_ollama(config: &Config) -> HealthCheck {
         None => warning(
             "ollama",
             "Not configured",
-            "No `ollama` section found in config.",
+            "Add an `ollama` section to the config or switch to another backend in the top bar.",
         ),
     }
 }
@@ -251,25 +276,7 @@ async fn fetch_openai_models(config: &Config) -> Result<Vec<String>, String> {
         .as_ref()
         .ok_or_else(|| "OpenAI is not configured.".to_string())?;
 
-    if chatgpt.api_key.trim().is_empty() || chatgpt.api_key == "YOUR_OPENAI_API_KEY" {
-        return Err("Set an OpenAI API key before loading available models.".to_string());
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
-    let response = client
-        .get("https://api.openai.com/v1/models")
-        .bearer_auth(&chatgpt.api_key)
-        .send()
-        .await
-        .map_err(|err| format!("OpenAI model lookup failed: {err}"))?;
-
-    collect_model_ids(response, |id| {
-        id.starts_with("gpt-") || id.starts_with("o") || id.contains("omni")
-    })
-    .await
+    fetch_openai_models_at("https://api.openai.com/v1/models", &chatgpt.api_key).await
 }
 
 async fn fetch_claude_models(config: &Config) -> Result<Vec<String>, String> {
@@ -278,23 +285,7 @@ async fn fetch_claude_models(config: &Config) -> Result<Vec<String>, String> {
         .as_ref()
         .ok_or_else(|| "Anthropic is not configured.".to_string())?;
 
-    if claude.api_key.trim().is_empty() || claude.api_key == "YOUR_ANTHROPIC_API_KEY" {
-        return Err("Set an Anthropic API key before loading available models.".to_string());
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
-    let response = client
-        .get("https://api.anthropic.com/v1/models")
-        .header("x-api-key", &claude.api_key)
-        .header("anthropic-version", "2023-06-01")
-        .send()
-        .await
-        .map_err(|err| format!("Anthropic model lookup failed: {err}"))?;
-
-    collect_model_ids(response, |id| id.starts_with("claude-")).await
+    fetch_claude_models_at("https://api.anthropic.com/v1/models", &claude.api_key).await
 }
 
 async fn fetch_gemini_models(config: &Config) -> Result<Vec<String>, String> {
@@ -303,8 +294,28 @@ async fn fetch_gemini_models(config: &Config) -> Result<Vec<String>, String> {
         .as_ref()
         .ok_or_else(|| "Gemini is not configured.".to_string())?;
 
-    if gemini.api_key.trim().is_empty() || gemini.api_key == "YOUR_GEMINI_API_KEY" {
-        return Err("Set a Gemini API key before loading available models.".to_string());
+    fetch_gemini_models_at(
+        "https://generativelanguage.googleapis.com/v1beta/models",
+        &gemini.api_key,
+    )
+    .await
+}
+
+async fn fetch_ollama_models(config: &Config) -> Result<Vec<String>, String> {
+    let ollama = config
+        .ollama
+        .as_ref()
+        .ok_or_else(|| "Ollama is not configured.".to_string())?;
+
+    fetch_ollama_models_at(&ollama.base_url).await
+}
+
+async fn fetch_openai_models_at(base_url: &str, api_key: &str) -> Result<Vec<String>, String> {
+    if api_key.trim().is_empty() || api_key == "YOUR_OPENAI_API_KEY" {
+        return Err(
+            "Open Settings, add the OpenAI API key, then click Refresh on the model field."
+                .to_string(),
+        );
     }
 
     let client = reqwest::Client::builder()
@@ -312,11 +323,76 @@ async fn fetch_gemini_models(config: &Config) -> Result<Vec<String>, String> {
         .build()
         .map_err(|err| format!("Could not create HTTP client: {err}"))?;
     let response = client
-        .get("https://generativelanguage.googleapis.com/v1beta/models")
-        .query(&[("key", gemini.api_key.as_str())])
+        .get(base_url)
+        .bearer_auth(api_key)
         .send()
         .await
-        .map_err(|err| format!("Gemini model lookup failed: {err}"))?;
+        .map_err(|err| {
+            format!(
+                "OpenAI model lookup failed: {err}. Check network access, proxy settings, and the API key, then click Refresh."
+            )
+        })?;
+
+    collect_model_ids(
+        response,
+        |id| id.starts_with("gpt-") || id.starts_with("o") || id.contains("omni"),
+        "OpenAI",
+    )
+    .await
+}
+
+async fn fetch_claude_models_at(base_url: &str, api_key: &str) -> Result<Vec<String>, String> {
+    if api_key.trim().is_empty() || api_key == "YOUR_ANTHROPIC_API_KEY" {
+        return Err(
+            "Open Settings, add the Anthropic API key, then click Refresh on the model field."
+                .to_string(),
+        );
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
+    let response = client
+        .get(base_url)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await
+        .map_err(|err| {
+            format!(
+                "Anthropic model lookup failed: {err}. Check network access, proxy settings, and the API key, then click Refresh."
+            )
+        })?;
+
+    collect_model_ids(response, |id| id.starts_with("claude-"), "Anthropic").await
+}
+
+async fn fetch_gemini_models_at(
+    models_base_url: &str,
+    api_key: &str,
+) -> Result<Vec<String>, String> {
+    if api_key.trim().is_empty() || api_key == "YOUR_GEMINI_API_KEY" {
+        return Err(
+            "Open Settings, add the Gemini API key, then click Refresh on the model field."
+                .to_string(),
+        );
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("Could not create HTTP client: {err}"))?;
+    let response = client
+        .get(models_base_url)
+        .query(&[("key", api_key)])
+        .send()
+        .await
+        .map_err(|err| {
+            format!(
+                "Gemini model lookup failed: {err}. Check network access, proxy settings, and the API key, then click Refresh."
+            )
+        })?;
 
     let value = parse_response_json(response).await?;
     let mut models = value
@@ -339,19 +415,20 @@ async fn fetch_gemini_models(config: &Config) -> Result<Vec<String>, String> {
 
     normalize_models(&mut models);
     if models.is_empty() {
-        return Err("No Gemini text-generation models were returned.".to_string());
+        return Err(
+            "Gemini did not return any text-generation models. Verify the API key can access models, then click Refresh."
+                .to_string(),
+        );
     }
     Ok(models)
 }
 
-async fn fetch_ollama_models(config: &Config) -> Result<Vec<String>, String> {
-    let ollama = config
-        .ollama
-        .as_ref()
-        .ok_or_else(|| "Ollama is not configured.".to_string())?;
-
-    if ollama.base_url.trim().is_empty() {
-        return Err("Set an Ollama base URL before loading available models.".to_string());
+async fn fetch_ollama_models_at(base_url: &str) -> Result<Vec<String>, String> {
+    if base_url.trim().is_empty() {
+        return Err(
+            "Open Settings, fill the Ollama base URL, then click Refresh on the model field."
+                .to_string(),
+        );
     }
 
     let client = reqwest::Client::builder()
@@ -359,13 +436,14 @@ async fn fetch_ollama_models(config: &Config) -> Result<Vec<String>, String> {
         .build()
         .map_err(|err| format!("Could not create HTTP client: {err}"))?;
     let response = client
-        .get(format!(
-            "{}/api/tags",
-            ollama.base_url.trim_end_matches('/')
-        ))
+        .get(format!("{}/api/tags", base_url.trim_end_matches('/')))
         .send()
         .await
-        .map_err(|err| format!("Ollama model lookup failed: {err}"))?;
+        .map_err(|err| {
+            format!(
+                "Ollama model lookup failed: {err}. Check the base URL, server reachability, and then click Refresh."
+            )
+        })?;
     let value = parse_response_json(response).await?;
     let mut models = value
         .get("models")
@@ -378,7 +456,10 @@ async fn fetch_ollama_models(config: &Config) -> Result<Vec<String>, String> {
 
     normalize_models(&mut models);
     if models.is_empty() {
-        return Err("No Ollama models were returned by the local server.".to_string());
+        return Err(
+            "Ollama did not return any models. Verify the server is reachable and that it exposes tags, then click Refresh."
+                .to_string(),
+        );
     }
     Ok(models)
 }
@@ -386,8 +467,17 @@ async fn fetch_ollama_models(config: &Config) -> Result<Vec<String>, String> {
 async fn collect_model_ids(
     response: reqwest::Response,
     keep: impl Fn(&str) -> bool,
+    provider: &str,
 ) -> Result<Vec<String>, String> {
     let value = parse_response_json(response).await?;
+    collect_model_ids_from_value(&value, keep, provider)
+}
+
+fn collect_model_ids_from_value(
+    value: &serde_json::Value,
+    keep: impl Fn(&str) -> bool,
+    provider: &str,
+) -> Result<Vec<String>, String> {
     let mut models = value
         .get("data")
         .and_then(|items| items.as_array())
@@ -400,28 +490,44 @@ async fn collect_model_ids(
 
     normalize_models(&mut models);
     if models.is_empty() {
-        return Err("No compatible models were returned by the provider.".to_string());
+        return Err(format!(
+            "{provider} did not return any compatible models. Verify the API key or account can access models, then click Refresh."
+        ));
     }
     Ok(models)
 }
 
 async fn parse_response_json(response: reqwest::Response) -> Result<serde_json::Value, String> {
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|err| format!("Could not read provider response: {err}"))?;
+    let body = response.text().await.map_err(|err| {
+        format!("Could not read provider response: {err}. Check connectivity and retry.")
+    })?;
 
+    parse_response_body(status, &body)
+}
+
+fn parse_response_body(
+    status: reqwest::StatusCode,
+    body: &str,
+) -> Result<serde_json::Value, String> {
     if !status.is_success() {
         let detail = body.trim();
         return Err(if detail.is_empty() {
-            format!("Provider request failed with status {status}.")
+            format!(
+                "Provider request failed with status {status}. Check credentials, quota, and endpoint settings, then click Refresh."
+            )
         } else {
-            format!("Provider request failed with status {status}: {detail}")
+            format!(
+                "Provider request failed with status {status}: {detail}. Check credentials, quota, and endpoint settings, then click Refresh."
+            )
         });
     }
 
-    serde_json::from_str(&body).map_err(|err| format!("Could not parse provider response: {err}"))
+    serde_json::from_str(body).map_err(|err| {
+        format!(
+            "Could not parse provider response: {err}. Verify the endpoint and try Refresh again."
+        )
+    })
 }
 
 fn normalize_models(models: &mut Vec<String>) {
@@ -457,12 +563,136 @@ fn error(backend: &str, summary: &str, detail: &str) -> HealthCheck {
     }
 }
 
+fn startup_config_health_check(config: &Config) -> HealthCheck {
+    match &config.loaded_from {
+        Some(path) => ok(
+            "config",
+            "Loaded",
+            format!(
+                "Loaded from `{}`. If this is not the config you expected, open the right profile and save once.",
+                path.display()
+            ),
+        ),
+        None => warning(
+            "config",
+            "Source missing",
+            "No config source was recorded. Save a setting once so the app can remember the active file.",
+        ),
+    }
+}
+
+fn startup_selected_backend_health_check(
+    selected_backend: &str,
+    provider_health_checks: &[HealthCheck],
+) -> HealthCheck {
+    provider_health_checks
+        .iter()
+        .find(|check| check.backend == selected_backend)
+        .map(|check| HealthCheck {
+            backend: "selected-backend".to_string(),
+            level: check.level.clone(),
+            summary: check.summary.clone(),
+            detail: format!(
+                "Selected backend `{selected_backend}`: {}. If this is not what you want, switch it in the top toolbar before sending.",
+                check.detail
+            ),
+        })
+        .unwrap_or_else(|| {
+            error(
+                "selected-backend",
+                "Unknown backend",
+                &format!(
+                    "The selected backend `{selected_backend}` is not supported. Use the top toolbar to choose chatgpt, claude, gemini, or ollama."
+                ),
+            )
+        })
+}
+
+pub fn startup_dictation_tools_health_check_for(
+    ffmpeg_available: bool,
+    arecord_available: bool,
+) -> HealthCheck {
+    if ffmpeg_available {
+        ok(
+            "dictation-tools",
+            "Ready",
+            "Voice dictation will use `ffmpeg` for microphone capture.".to_string(),
+        )
+    } else if arecord_available {
+        ok(
+            "dictation-tools",
+            "Ready",
+            "Voice dictation will use `arecord` for microphone capture.".to_string(),
+        )
+    } else {
+        warning(
+            "dictation-tools",
+            "Tools missing",
+            "Voice dictation needs `ffmpeg` or `arecord` on the system. Install one of them, then reopen dictation.",
+        )
+    }
+}
+
+fn startup_clipboard_tools_health_check() -> HealthCheck {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        startup_clipboard_tools_health_check_for(
+            command_exists("wl-paste"),
+            command_exists("xclip"),
+        )
+    }
+
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        ok(
+            "clipboard-tools",
+            "Ready",
+            "Clipboard image paste uses the platform clipboard integration.",
+        )
+    }
+}
+
+pub fn startup_clipboard_tools_health_check_for(
+    wl_paste_available: bool,
+    xclip_available: bool,
+) -> HealthCheck {
+    if wl_paste_available {
+        ok(
+            "clipboard-tools",
+            "Ready",
+            "Clipboard image paste can use `wl-paste` on Wayland.".to_string(),
+        )
+    } else if xclip_available {
+        ok(
+            "clipboard-tools",
+            "Ready",
+            "Clipboard image paste can use `xclip` on X11.".to_string(),
+        )
+    } else {
+        warning(
+            "clipboard-tools",
+            "Limited",
+            "Clipboard image paste falls back to native clipboard handling on this platform. Install `wl-paste` or `xclip` on Linux if image paste stays unavailable.",
+        )
+    }
+}
+
+fn command_exists(name: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {name} >/dev/null 2>&1"))
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn prepare_prompt(
     prompt: &str,
     conversation: &[ConversationTurn],
     prompt_profiles: &PromptProfiles,
     mode: PromptMode,
     has_images: bool,
+    active_window_context: Option<&str>,
 ) -> String {
     let (expanded_prompt, detected_tags) = match mode {
         PromptMode::TextAssist => expand_tags(
@@ -525,6 +755,12 @@ fn prepare_prompt(
             "If images or screenshots are attached, use them as visual context to read text, understand interfaces, extract details, and improve the answer."
                 .to_string(),
         );
+    }
+
+    if let Some(active_window_context) = active_window_context {
+        instructions.push(format!(
+            "If relevant, use this active window context only as a hint: {active_window_context}."
+        ));
     }
 
     if mode == PromptMode::GenericQuestion {
@@ -712,6 +948,7 @@ mod tests {
     };
     use crate::prompt_profiles::{GenericPromptTag, PromptProfiles};
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     fn test_config() -> Config {
         Config {
@@ -757,6 +994,7 @@ mod tests {
             &test_profiles(),
             PromptMode::TextAssist,
             false,
+            None,
         );
 
         assert!(prompt.contains("Act as a text transformation assistant"));
@@ -773,6 +1011,7 @@ mod tests {
             &test_profiles(),
             PromptMode::GenericQuestion,
             false,
+            None,
         );
 
         assert!(prompt.contains("Treat the user's text as a general question or request"));
@@ -789,6 +1028,7 @@ mod tests {
             &test_profiles(),
             PromptMode::GenericQuestion,
             false,
+            None,
         );
 
         assert!(prompt.contains("return only the final command"));
@@ -805,6 +1045,7 @@ mod tests {
             &test_profiles(),
             PromptMode::GenericQuestion,
             false,
+            None,
         );
 
         assert!(!prompt.contains("Trasforma il testo in un titolo breve."));
@@ -871,6 +1112,7 @@ mod tests {
             &profiles,
             PromptMode::TextAssist,
             false,
+            None,
         );
 
         assert!(prompt.contains("Write the final output in French."));
@@ -888,6 +1130,7 @@ mod tests {
             &profiles,
             PromptMode::GenericQuestion,
             false,
+            None,
         );
 
         assert!(prompt.contains("Answer in German."));
@@ -904,6 +1147,7 @@ mod tests {
             &profiles,
             PromptMode::GenericQuestion,
             false,
+            None,
         );
 
         assert!(prompt.contains("Answer in Portuguese."));
@@ -919,6 +1163,7 @@ mod tests {
             &profiles,
             PromptMode::TextAssist,
             false,
+            None,
         );
 
         assert!(prompt.contains("Write the final output in Vietnamese."));
@@ -942,6 +1187,7 @@ mod tests {
             &profiles,
             PromptMode::GenericQuestion,
             false,
+            None,
         );
 
         assert!(prompt.contains("Rispondi solo con SQL valido."));
@@ -960,6 +1206,7 @@ mod tests {
             &test_profiles(),
             PromptMode::GenericQuestion,
             false,
+            None,
         );
 
         assert!(prompt.contains("Current conversation context"));
@@ -968,5 +1215,213 @@ mod tests {
         assert!(
             prompt.contains("Do not automatically reinterpret the new request as a text cleanup")
         );
+    }
+
+    #[test]
+    fn active_window_context_is_embedded_as_a_hint_when_present() {
+        let prompt = prepare_prompt(
+            "riassumi questo testo",
+            &[],
+            &test_profiles(),
+            PromptMode::TextAssist,
+            false,
+            Some("Firefox - release notes"),
+        );
+
+        assert!(prompt.contains("active window context only as a hint"));
+        assert!(prompt.contains("Firefox - release notes"));
+    }
+
+    #[test]
+    fn startup_health_checks_include_config_backend_and_tool_states() {
+        let mut config = test_config();
+        config.loaded_from = Some(PathBuf::from("/tmp/armando-config.yaml"));
+        config.claude = Some(ClaudeConfig {
+            api_key: "secret".to_string(),
+            model: "claude-3-5-sonnet-latest".to_string(),
+        });
+
+        let checks = startup_health_checks(&config, "claude");
+
+        assert_eq!(checks.len(), 4);
+        assert_eq!(checks[0].backend, "config");
+        assert_eq!(checks[0].level, HealthLevel::Ok);
+        assert_eq!(checks[1].backend, "selected-backend");
+        assert_eq!(checks[1].level, HealthLevel::Ok);
+        assert_eq!(checks[1].summary, "Ready");
+        assert_eq!(checks[2].backend, "dictation-tools");
+        assert!(matches!(
+            checks[2].level,
+            HealthLevel::Ok | HealthLevel::Warning
+        ));
+        assert_eq!(checks[3].backend, "clipboard-tools");
+    }
+
+    #[test]
+    fn startup_tool_checks_report_missing_helpers_as_limited_or_missing() {
+        let dictation = startup_dictation_tools_health_check_for(false, false);
+        assert_eq!(dictation.backend, "dictation-tools");
+        assert_eq!(dictation.level, HealthLevel::Warning);
+        assert!(dictation.detail.contains("Install"));
+        assert!(dictation.detail.contains("ffmpeg"));
+
+        let clipboard = startup_clipboard_tools_health_check_for(false, false);
+        assert_eq!(clipboard.backend, "clipboard-tools");
+        assert_eq!(clipboard.level, HealthLevel::Warning);
+        assert!(clipboard.detail.contains("wl-paste"));
+        assert!(clipboard.detail.contains("xclip"));
+    }
+
+    #[test]
+    fn health_checks_point_to_settings_when_provider_setup_is_missing_or_incomplete() {
+        let config = test_config();
+
+        let chatgpt = health_check_openai(&config);
+        assert!(matches!(
+            chatgpt.level,
+            HealthLevel::Warning | HealthLevel::Error
+        ));
+        assert!(chatgpt.detail.contains("switch"));
+
+        let claude = health_check_claude(&config);
+        assert_eq!(claude.level, HealthLevel::Error);
+        assert!(claude.detail.contains("Settings"));
+
+        let gemini = health_check_gemini(&config);
+        assert!(matches!(
+            gemini.level,
+            HealthLevel::Warning | HealthLevel::Error
+        ));
+        assert!(gemini.detail.contains("switch"));
+
+        let ollama = health_check_ollama(&config);
+        assert!(matches!(
+            ollama.level,
+            HealthLevel::Warning | HealthLevel::Error
+        ));
+        assert!(
+            ollama.detail.contains("Settings")
+                || ollama.detail.contains("switch to another backend")
+        );
+    }
+
+    #[test]
+    fn response_body_parser_reports_http_error_body() {
+        let err = parse_response_body(
+            reqwest::StatusCode::UNAUTHORIZED,
+            r#"{"error":{"message":"invalid api key"}}"#,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Provider request failed with status 401"));
+        assert!(err.contains("invalid api key"));
+    }
+
+    #[test]
+    fn response_body_parser_reports_malformed_json() {
+        let err = parse_response_body(reqwest::StatusCode::OK, "not-json").unwrap_err();
+
+        assert!(err.contains("Could not parse provider response"));
+    }
+
+    #[test]
+    fn openai_model_lookup_reports_empty_model_list() {
+        let value = serde_json::json!({"data":[{"id":"text-davinci-003"}]});
+        let err = collect_model_ids_from_value(&value, |id| id.starts_with("gpt-"), "OpenAI")
+            .unwrap_err();
+
+        assert!(err.contains("OpenAI did not return any compatible models"));
+    }
+
+    #[test]
+    fn gemini_model_lookup_reports_empty_text_models() {
+        let value = serde_json::json!({
+            "models": [
+                {
+                    "name": "models/gemini-1.5-pro",
+                    "supportedGenerationMethods": ["embedContent"]
+                }
+            ]
+        });
+
+        let models = value
+            .get("models")
+            .and_then(|items| items.as_array())
+            .into_iter()
+            .flatten()
+            .filter(|model| {
+                model
+                    .get("supportedGenerationMethods")
+                    .and_then(|methods| methods.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|method| method.as_str())
+                    .any(|method| method == "generateContent")
+            })
+            .filter_map(|model| model.get("name").and_then(|name| name.as_str()))
+            .map(|name| name.trim_start_matches("models/").to_string())
+            .collect::<Vec<_>>();
+
+        assert!(models.is_empty());
+    }
+
+    #[test]
+    fn ollama_model_lookup_reports_empty_list() {
+        let value = serde_json::json!({"models":[]});
+        let mut models = value
+            .get("models")
+            .and_then(|items| items.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|model| model.get("name").and_then(|name| name.as_str()))
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        normalize_models(&mut models);
+        assert!(models.is_empty());
+    }
+
+    #[test]
+    fn chatgpt_query_maps_quota_style_error_body() {
+        let message = crate::backends::chatgpt::openai_error_message(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error":{"message":"rate limit exceeded"}}"#,
+            "gpt-4o",
+        );
+
+        assert!(message.contains("Quota OpenAI esaurita"));
+        assert!(message.contains("rate limit exceeded"));
+    }
+
+    #[test]
+    fn claude_query_reports_error_body() {
+        let message = crate::backends::claude::claude_error_message(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"bad prompt"}}"#,
+            "claude-3-5-sonnet-latest",
+        );
+
+        assert!(message.contains("Claude API error"));
+        assert!(message.contains("bad prompt"));
+    }
+
+    #[test]
+    fn gemini_query_reports_malformed_response_structure() {
+        let err =
+            crate::backends::gemini::gemini_response_text(&serde_json::json!({})).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("Unexpected Gemini API response structure"));
+    }
+
+    #[test]
+    fn ollama_query_reports_malformed_response_structure() {
+        let err = crate::backends::ollama::ollama_response_text(&serde_json::json!({"foo":"bar"}))
+            .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("Invalid response format from Ollama"));
     }
 }

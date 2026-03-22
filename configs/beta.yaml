@@ -1,8 +1,7 @@
-aliases: null
 auto_read_selection: true
-default_backend: chatgpt
+default_backend: gemini
 theme:
-  name: nerv-hud
+  name: default-dark
   path: null
 ui:
   language: en
@@ -10,7 +9,7 @@ ui:
 history:
   enabled: false
 logging:
-  enabled: false
+  enabled: true
 gemini:
   api_key: YOUR_GEMINI_API_KEY
   model: gemini-1.5-flash
@@ -22,4 +21,4 @@ claude:
   model: claude-3-5-sonnet-latest
 ollama:
   base_url: http://localhost:11434
-  model: gemma3:latest
+  model: gemma3:1b
