@@ -647,7 +647,7 @@ fn startup_clipboard_tools_health_check() -> HealthCheck {
         ok(
             "clipboard-tools",
             "Ready",
-            "Clipboard image paste uses the platform clipboard integration.",
+            "Clipboard image paste uses the platform clipboard integration.".to_string(),
         )
     }
 }

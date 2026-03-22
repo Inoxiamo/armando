@@ -1,3 +1,4 @@
+#[cfg(all(unix, not(target_os = "macos")))]
 use serde_json::Value;
 use std::process::Command;
 
