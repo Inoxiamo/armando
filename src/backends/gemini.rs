@@ -3,6 +3,8 @@ use crate::config::Config;
 use anyhow::{anyhow, Result};
 use serde_json::json;
 
+const GEMINI_EMBEDDING_FALLBACK_MODEL: &str = "gemini-embedding-001";
+
 pub async fn query(prompt: &str, images: &[ImageAttachment], config: &Config) -> Result<String> {
     let (api_key, model) = if let Some(ref c) = config.gemini {
         (c.api_key.clone(), c.model.clone())
@@ -100,7 +102,7 @@ pub async fn embed_with_model(
         preferred_model,
     )
     .await
-    .unwrap_or_else(|_| "text-embedding-004".to_string());
+    .unwrap_or_else(|_| GEMINI_EMBEDDING_FALLBACK_MODEL.to_string());
 
     match embed_at(
         "https://generativelanguage.googleapis.com/v1beta/models",
@@ -115,7 +117,7 @@ pub async fn embed_with_model(
         Err(_) => {
             embed_at(
                 "https://generativelanguage.googleapis.com/v1beta/models",
-                "text-embedding-004",
+                GEMINI_EMBEDDING_FALLBACK_MODEL,
                 text,
                 &api_key,
                 preferred_model,
@@ -220,15 +222,15 @@ async fn resolve_embedding_model(
     }
     if available
         .iter()
-        .any(|candidate| candidate == "text-embedding-004")
+        .any(|candidate| candidate == GEMINI_EMBEDDING_FALLBACK_MODEL)
     {
-        return Ok("text-embedding-004".to_string());
+        return Ok(GEMINI_EMBEDDING_FALLBACK_MODEL.to_string());
     }
     if available
         .iter()
-        .any(|candidate| candidate == "embedding-001")
+        .any(|candidate| candidate == "gemini-embedding-2-preview")
     {
-        return Ok("embedding-001".to_string());
+        return Ok("gemini-embedding-2-preview".to_string());
     }
 
     Ok(available[0].clone())

@@ -59,6 +59,20 @@ API keys can be loaded from environment variables (or a local `.env` file in the
 
 Keep `.env` local and uncommitted.
 
+### Local Runtime Data
+
+Operational data is split between config and app data directories:
+
+- Config/profile files: platform config dir under `armando/` (see `INSTALL.md`), unless overridden with `ARMANDO_CONFIG`.
+- History (when enabled): `.../armando/history/history.jsonl`.
+- Debug logs (when enabled): `.../armando/logs/debug.jsonl` and `.../armando/logs/debug-readable.log`.
+- RAG vector DB: `rag.vector_db_path` from config. Default is `.armando-rag.sqlite3`.
+
+Dev/local run context:
+
+- When `rag.vector_db_path` is relative (default), it is resolved from the current working directory where you start the app/CLI (`cargo run`, `--rag-index`, etc.).
+- Config discovery checks `ARMANDO_CONFIG`, executable-adjacent paths, current working directory, then the platform config dir.
+
 The `ui` section supports visual preferences such as language and initial window height. Example:
 
 ```yaml
@@ -80,12 +94,13 @@ RAG is configured under `rag` and can be switched between lexical and semantic r
 rag:
   enabled: true
   mode: keyword # keyword | vector | hybrid
+  runtime_override: default # default | force_on | force_off
   documents_folder: ".test-doc-rag"
   vector_db_path: ".armando-rag.sqlite3"
   max_retrieved_docs: 4
   chunk_size: 1200
   embedding_backend: "gemini" # optional, for vector/hybrid
-  embedding_model: "embedding-001" # optional, for vector/hybrid
+  embedding_model: "gemini-embedding-001" # optional, for vector/hybrid
 ```
 
 When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
@@ -118,7 +133,17 @@ When the settings panel is open, the footer shows the current app version and, o
 - `hybrid`: combines lexical + vector scores.
 
 When vector scoring is active, `rag.embedding_backend` and `rag.embedding_model` let you decouple embedding from the currently selected query backend/model.
+If `rag.embedding_backend` is not set, embedding falls back to `ollama` by default.
 Runtime prompt overrides are available with `!rag on` and `!rag off`.
+
+### Gemini: Query vs Embedding Model Mismatch
+
+Gemini can query with one model and embed with another. A common failure is using a text-generation model as `rag.embedding_model`.
+
+- Symptom: normal Gemini chat works, but RAG indexing/retrieval fails on embedding calls.
+- Cause: query uses `generateContent`, embeddings require a model that supports `embedContent`.
+- Fix: set `rag.embedding_model` to an embedding model (for example `text-embedding-004`), or remove the override and let fallback pick a compatible embedding model.
+- If needed, pin `rag.embedding_backend: gemini` so embeddings do not follow a different active backend.
 
 To pre-index documents offline:
 

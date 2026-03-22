@@ -1,17 +1,25 @@
+mod scoring;
+mod text;
+
 use crate::backends;
 use crate::config::{Config, RagConfig, RagMode};
 use anyhow::{anyhow, Context, Result};
-use calamine::{open_workbook_auto, Reader};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Transaction};
+use scoring::{
+    finalize_hybrid_results, merge_keyword_candidates, merge_vector_candidates,
+    normalize_keyword_scores,
+};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
+use text::{
+    build_keyword_match_query, chunk_text, cosine_similarity_precomputed, extract_text,
+    is_supported, vector_norm,
+};
 use walkdir::WalkDir;
-use zip::ZipArchive;
 
 #[derive(Debug, Clone)]
 pub struct RetrievedDocument {
@@ -84,89 +92,16 @@ impl RagSystem {
         config: &Config,
         mode: RetrievalMode,
     ) -> Result<IndexStats> {
-        let docs_folder = self
-            .config
-            .documents_folder
-            .clone()
-            .ok_or_else(|| anyhow!("RAG documents_folder is not configured"))?;
-        let docs_folder = normalize_path(&docs_folder);
-        if !docs_folder.exists() {
-            return Err(anyhow!(
-                "RAG documents folder does not exist: {}",
-                docs_folder.display()
-            ));
-        }
-
-        let db_path = normalize_path(&self.config.vector_db_path);
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create parent directory for vector DB at {}",
-                    db_path.display()
-                )
-            })?;
-        }
-
-        let conn = Connection::open(&db_path)
-            .with_context(|| format!("Failed to open vector DB at {}", db_path.display()))?;
-        ensure_schema(&conn)?;
-        let retrieval_scope = retrieval_scope_key(backend, config);
-        clear_backend_entries(&conn, &retrieval_scope)?;
-
-        let mut indexed_files = 0usize;
-        let mut indexed_chunks = 0usize;
-        let store_embeddings = matches!(mode, RetrievalMode::Vector | RetrievalMode::Hybrid);
-        let store_keyword_index = matches!(mode, RetrievalMode::Keyword | RetrievalMode::Hybrid);
-
-        for entry in WalkDir::new(&docs_folder)
-            .into_iter()
-            .filter_map(std::result::Result::ok)
-            .filter(|entry| entry.file_type().is_file())
-        {
-            let path = entry.path();
-            if !is_supported(path) {
-                continue;
-            }
-            let text = match extract_text(path) {
-                Ok(text) => text,
-                Err(err) => {
-                    log::warn!("Skipping {}: {err:#}", path.display());
-                    continue;
-                }
-            };
-            let chunks = chunk_text(&text, self.config.chunk_size);
-            if chunks.is_empty() {
-                continue;
-            }
-
-            indexed_files += 1;
-            for (chunk_index, chunk) in chunks.iter().enumerate() {
-                let embedding = if store_embeddings {
-                    Some(
-                        backends::embed_text(backend, chunk, config)
-                            .await
-                            .map_err(|err| anyhow!("Embedding generation failed: {err}"))?,
-                    )
-                } else {
-                    None
-                };
-                persist_chunk(
-                    &conn,
-                    &retrieval_scope,
-                    path,
-                    chunk_index,
-                    chunk,
-                    embedding.as_deref(),
-                    self.config.chunk_size,
-                    store_keyword_index,
-                )?;
-                indexed_chunks += 1;
-            }
-        }
+        let docs_folder = self.resolve_documents_folder()?;
+        let db_path = self.prepare_db_path()?;
+        let prepared = self
+            .collect_pending_index_chunks(backend, config, mode, &docs_folder)
+            .await?;
+        self.persist_pending_index_chunks(backend, config, &db_path, &prepared)?;
 
         Ok(IndexStats {
-            indexed_files,
-            indexed_chunks,
+            indexed_files: prepared.indexed_files,
+            indexed_chunks: prepared.indexed_chunks,
         })
     }
 
@@ -196,25 +131,12 @@ impl RagSystem {
         match mode {
             RetrievalMode::Keyword => self.retrieve_keyword(&retrieval_scope, query),
             RetrievalMode::Vector => {
-                let embedding = backends::embed_text(backend, query, config)
+                self.retrieve_vector_for_query(&retrieval_scope, backend, query, config)
                     .await
-                    .map_err(|err| anyhow!("Failed to embed query for retrieval: {err}"))?;
-                Ok(self.retrieve_from_embedding(
-                    &retrieval_scope,
-                    &embedding,
-                    self.config.max_retrieved_docs,
-                )?)
             }
             RetrievalMode::Hybrid => {
-                let embedding = backends::embed_text(backend, query, config)
+                self.retrieve_hybrid_for_query(&retrieval_scope, backend, query, config)
                     .await
-                    .map_err(|err| anyhow!("Failed to embed query for retrieval: {err}"))?;
-                self.retrieve_hybrid_from_embedding(
-                    &retrieval_scope,
-                    query,
-                    &embedding,
-                    self.config.max_retrieved_docs,
-                )
             }
         }
     }
@@ -253,64 +175,9 @@ impl RagSystem {
             self.retrieve_keyword_candidates(backend, query, candidate_limit)?;
 
         let mut merged: HashMap<(String, i64), HybridAggregate> = HashMap::new();
-
-        for candidate in vector_candidates {
-            let key = (candidate.file_path.clone(), candidate.chunk_index);
-            let normalized = normalize_vector_score(candidate.score);
-            merged
-                .entry(key)
-                .and_modify(|entry| {
-                    entry.vector_score = Some(normalized);
-                })
-                .or_insert_with(|| HybridAggregate {
-                    file_path: candidate.file_path,
-                    chunk_text: candidate.chunk_text,
-                    vector_score: Some(normalized),
-                    keyword_score: None,
-                });
-        }
-
-        let keyword_scores = normalize_keyword_scores(&keyword_candidates);
-        for candidate in keyword_candidates {
-            let key = (candidate.file_path.clone(), candidate.chunk_index);
-            let normalized = keyword_scores.get(&key).copied().unwrap_or(1.0);
-            merged
-                .entry(key)
-                .and_modify(|entry| {
-                    entry.keyword_score = Some(normalized);
-                })
-                .or_insert_with(|| HybridAggregate {
-                    file_path: candidate.file_path,
-                    chunk_text: candidate.chunk_text,
-                    vector_score: None,
-                    keyword_score: Some(normalized),
-                });
-        }
-
-        let mut scored = merged
-            .into_values()
-            .map(|entry| {
-                let mut total = 0.0f32;
-                let mut count = 0.0f32;
-                if let Some(score) = entry.vector_score {
-                    total += score;
-                    count += 1.0;
-                }
-                if let Some(score) = entry.keyword_score {
-                    total += score;
-                    count += 1.0;
-                }
-                RetrievedDocument {
-                    file_path: entry.file_path,
-                    chunk_text: entry.chunk_text,
-                    score: if count > 0.0 { total / count } else { 0.0 },
-                }
-            })
-            .collect::<Vec<_>>();
-
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-        scored.truncate(top_n);
-        Ok(scored)
+        merge_vector_candidates(&mut merged, vector_candidates);
+        merge_keyword_candidates(&mut merged, keyword_candidates);
+        Ok(finalize_hybrid_results(merged, top_n))
     }
 
     pub fn retrieve_from_embedding(
@@ -424,6 +291,178 @@ impl RagSystem {
 
         Ok(scored)
     }
+
+    fn resolve_documents_folder(&self) -> Result<PathBuf> {
+        let docs_folder = self
+            .config
+            .documents_folder
+            .clone()
+            .ok_or_else(|| anyhow!("RAG documents_folder is not configured"))?;
+        let docs_folder = normalize_path(&docs_folder);
+        if !docs_folder.exists() {
+            return Err(anyhow!(
+                "RAG documents folder does not exist: {}",
+                docs_folder.display()
+            ));
+        }
+        Ok(docs_folder)
+    }
+
+    fn prepare_db_path(&self) -> Result<PathBuf> {
+        let db_path = normalize_path(&self.config.vector_db_path);
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create parent directory for vector DB at {}",
+                    db_path.display()
+                )
+            })?;
+        }
+        Ok(db_path)
+    }
+
+    async fn collect_pending_index_chunks(
+        &self,
+        backend: &str,
+        config: &Config,
+        mode: RetrievalMode,
+        docs_folder: &Path,
+    ) -> Result<PendingIndexData> {
+        let store_embeddings = matches!(mode, RetrievalMode::Vector | RetrievalMode::Hybrid);
+        let store_keyword_index = matches!(mode, RetrievalMode::Keyword | RetrievalMode::Hybrid);
+        let mut indexed_files = 0usize;
+        let mut indexed_chunks = 0usize;
+        let mut chunks = Vec::new();
+
+        for entry in WalkDir::new(docs_folder)
+            .into_iter()
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+        {
+            let path = entry.path();
+            if !is_supported(path) {
+                continue;
+            }
+            let text = match extract_text(path) {
+                Ok(text) => text,
+                Err(err) => {
+                    log::warn!("Skipping {}: {err:#}", path.display());
+                    continue;
+                }
+            };
+            let file_chunks = chunk_text(&text, self.config.chunk_size);
+            if file_chunks.is_empty() {
+                continue;
+            }
+
+            indexed_files += 1;
+            for (chunk_index, chunk_text) in file_chunks.into_iter().enumerate() {
+                let embedding = if store_embeddings {
+                    Some(
+                        backends::embed_text(backend, &chunk_text, config)
+                            .await
+                            .map_err(|err| anyhow!("Embedding generation failed: {err}"))?,
+                    )
+                } else {
+                    None
+                };
+                chunks.push(PendingChunk {
+                    file_path: path.to_path_buf(),
+                    chunk_index,
+                    chunk_text,
+                    embedding,
+                });
+                indexed_chunks += 1;
+            }
+        }
+
+        Ok(PendingIndexData {
+            indexed_files,
+            indexed_chunks,
+            store_keyword_index,
+            chunks,
+        })
+    }
+
+    fn persist_pending_index_chunks(
+        &self,
+        backend: &str,
+        config: &Config,
+        db_path: &Path,
+        prepared: &PendingIndexData,
+    ) -> Result<()> {
+        let mut conn = Connection::open(db_path)
+            .with_context(|| format!("Failed to open vector DB at {}", db_path.display()))?;
+        ensure_schema(&conn)?;
+        let retrieval_scope = retrieval_scope_key(backend, config);
+        // Clear + insert are committed together to avoid partial reindex states.
+        let tx = conn.transaction()?;
+        clear_backend_entries(&tx, &retrieval_scope)?;
+        for chunk in &prepared.chunks {
+            persist_chunk(
+                &tx,
+                &retrieval_scope,
+                &chunk.file_path,
+                chunk.chunk_index,
+                &chunk.chunk_text,
+                chunk.embedding.as_deref(),
+                self.config.chunk_size,
+                prepared.store_keyword_index,
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    async fn retrieve_vector_for_query(
+        &self,
+        retrieval_scope: &str,
+        backend: &str,
+        query: &str,
+        config: &Config,
+    ) -> Result<Vec<RetrievedDocument>> {
+        let embedding = self
+            .embed_query_for_retrieval(backend, query, config)
+            .await?;
+        self.retrieve_from_embedding_with_limit(retrieval_scope, &embedding)
+    }
+
+    async fn retrieve_hybrid_for_query(
+        &self,
+        retrieval_scope: &str,
+        backend: &str,
+        query: &str,
+        config: &Config,
+    ) -> Result<Vec<RetrievedDocument>> {
+        let embedding = self
+            .embed_query_for_retrieval(backend, query, config)
+            .await?;
+        self.retrieve_hybrid_from_embedding(
+            retrieval_scope,
+            query,
+            &embedding,
+            self.config.max_retrieved_docs,
+        )
+    }
+
+    async fn embed_query_for_retrieval(
+        &self,
+        backend: &str,
+        query: &str,
+        config: &Config,
+    ) -> Result<Vec<f32>> {
+        backends::embed_text(backend, query, config)
+            .await
+            .map_err(|err| anyhow!("Failed to embed query for retrieval: {err}"))
+    }
+
+    fn retrieve_from_embedding_with_limit(
+        &self,
+        retrieval_scope: &str,
+        embedding: &[f32],
+    ) -> Result<Vec<RetrievedDocument>> {
+        self.retrieve_from_embedding(retrieval_scope, embedding, self.config.max_retrieved_docs)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -440,6 +479,22 @@ struct HybridAggregate {
     chunk_text: String,
     vector_score: Option<f32>,
     keyword_score: Option<f32>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingChunk {
+    file_path: PathBuf,
+    chunk_index: usize,
+    chunk_text: String,
+    embedding: Option<Vec<f32>>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingIndexData {
+    indexed_files: usize,
+    indexed_chunks: usize,
+    store_keyword_index: bool,
+    chunks: Vec<PendingChunk>,
 }
 
 #[derive(Debug, Clone)]
@@ -469,7 +524,7 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
 }
 
-fn clear_backend_entries(conn: &Connection, backend: &str) -> Result<()> {
+fn clear_backend_entries(conn: &Transaction<'_>, backend: &str) -> Result<()> {
     conn.execute(
         "DELETE FROM rag_vectors_fts WHERE backend = ?1",
         params![backend],
@@ -634,7 +689,7 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
 }
 
 fn persist_chunk(
-    conn: &Connection,
+    conn: &Transaction<'_>,
     backend: &str,
     file_path: &Path,
     chunk_index: usize,
@@ -674,232 +729,4 @@ fn persist_chunk(
         )?;
     }
     Ok(())
-}
-
-fn normalize_vector_score(score: f32) -> f32 {
-    ((score + 1.0) / 2.0).clamp(0.0, 1.0)
-}
-
-fn normalize_keyword_score(raw_score: f32, min_raw: f32, max_raw: f32) -> f32 {
-    if (max_raw - min_raw).abs() < f32::EPSILON {
-        1.0
-    } else {
-        ((max_raw - raw_score) / (max_raw - min_raw)).clamp(0.0, 1.0)
-    }
-}
-
-fn normalize_keyword_scores(candidates: &[ScoredChunk]) -> HashMap<(String, i64), f32> {
-    if candidates.is_empty() {
-        return HashMap::new();
-    }
-
-    let min_raw = candidates
-        .iter()
-        .map(|candidate| candidate.score)
-        .fold(f32::INFINITY, f32::min);
-    let max_raw = candidates
-        .iter()
-        .map(|candidate| candidate.score)
-        .fold(f32::NEG_INFINITY, f32::max);
-
-    candidates
-        .iter()
-        .map(|candidate| {
-            (
-                (candidate.file_path.clone(), candidate.chunk_index),
-                normalize_keyword_score(candidate.score, min_raw, max_raw),
-            )
-        })
-        .collect()
-}
-
-fn build_keyword_match_query(query: &str) -> Option<String> {
-    let mut terms = Vec::new();
-    for term in query.split(|ch: char| !ch.is_alphanumeric()) {
-        let term = term.trim().to_ascii_lowercase();
-        if term.is_empty() {
-            continue;
-        }
-        if !terms.contains(&term) {
-            terms.push(term);
-        }
-        if terms.len() >= 12 {
-            break;
-        }
-    }
-
-    if terms.is_empty() {
-        None
-    } else {
-        Some(terms.join(" AND "))
-    }
-}
-
-fn is_supported(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    matches!(
-        ext.as_str(),
-        "md" | "py" | "java" | "xml" | "txt" | "pdf" | "doc" | "docx" | "xls" | "xlsx"
-    )
-}
-
-fn extract_text(path: &Path) -> Result<String> {
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    match ext.as_str() {
-        "pdf" => Ok(pdf_extract::extract_text(path)?),
-        "docx" => extract_docx_text(path),
-        "xls" | "xlsx" => extract_spreadsheet_text(path),
-        "doc" => extract_doc_legacy_text(path),
-        _ => Ok(fs::read_to_string(path)?),
-    }
-}
-
-fn extract_docx_text(path: &Path) -> Result<String> {
-    let file = fs::File::open(path)?;
-    let mut archive = ZipArchive::new(file)?;
-    let mut xml_file = archive
-        .by_name("word/document.xml")
-        .context("DOCX missing word/document.xml")?;
-    let mut xml = String::new();
-    xml_file.read_to_string(&mut xml)?;
-    Ok(strip_xml_tags(&xml))
-}
-
-fn extract_spreadsheet_text(path: &Path) -> Result<String> {
-    let mut workbook = open_workbook_auto(path)?;
-    let mut out = String::new();
-    for name in workbook.sheet_names().to_owned() {
-        if let Ok(range) = workbook.worksheet_range(&name) {
-            out.push_str(&format!("Sheet: {name}\n"));
-            for row in range.rows() {
-                let line = row
-                    .iter()
-                    .map(|cell| cell.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                if !line.trim().is_empty() {
-                    out.push_str(&line);
-                    out.push('\n');
-                }
-            }
-            out.push('\n');
-        }
-    }
-    Ok(out)
-}
-
-fn extract_doc_legacy_text(path: &Path) -> Result<String> {
-    let bytes = fs::read(path)?;
-    let ascii = bytes
-        .iter()
-        .map(|byte| {
-            if (32..=126).contains(byte) || *byte == b'\n' || *byte == b'\t' || *byte == b' ' {
-                *byte as char
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>();
-    let normalized = ascii
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string();
-    Ok(normalized)
-}
-
-fn strip_xml_tags(xml: &str) -> String {
-    let mut out = String::new();
-    let mut in_tag = false;
-    for ch in xml.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-                out.push(' ');
-            }
-            _ if !in_tag => out.push(ch),
-            _ => {}
-        }
-    }
-    out.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-}
-
-fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
-    let chunk_size = chunk_size.max(128);
-    let normalized = text.replace("\r\n", "\n");
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-
-    for paragraph in normalized.split("\n\n") {
-        let trimmed = paragraph.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if current.len() + trimmed.len() + 2 <= chunk_size {
-            if !current.is_empty() {
-                current.push_str("\n\n");
-            }
-            current.push_str(trimmed);
-            continue;
-        }
-
-        if !current.is_empty() {
-            chunks.push(current.clone());
-            current.clear();
-        }
-
-        if trimmed.len() <= chunk_size {
-            current.push_str(trimmed);
-            continue;
-        }
-
-        let chars = trimmed.chars().collect::<Vec<_>>();
-        let mut start = 0usize;
-        while start < chars.len() {
-            let end = (start + chunk_size).min(chars.len());
-            let part = chars[start..end]
-                .iter()
-                .collect::<String>()
-                .trim()
-                .to_string();
-            if !part.is_empty() {
-                chunks.push(part);
-            }
-            start = end;
-        }
-    }
-
-    if !current.trim().is_empty() {
-        chunks.push(current);
-    }
-
-    chunks
-}
-
-fn vector_norm(v: &[f32]) -> f32 {
-    v.iter().map(|x| x * x).sum::<f32>().sqrt()
-}
-
-fn cosine_similarity_precomputed(a: &[f32], a_norm: f32, b: &[f32], b_norm: f32) -> f32 {
-    if a_norm <= f32::EPSILON || b_norm <= f32::EPSILON {
-        return 0.0;
-    }
-
-    let dot = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f32>();
-    dot / (a_norm * b_norm)
 }

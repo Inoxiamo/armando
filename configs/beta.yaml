@@ -21,6 +21,7 @@ rag:
   chunk_size: 1200
   embedding_backend: null
   embedding_model: null
+  runtime_override: default
 gemini:
   api_key: YOUR_GEMINI_API_KEY
   model: gemini-1.5-flash

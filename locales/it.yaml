@@ -117,7 +117,7 @@ strings:
   settings.history_warning: "Disattivata di default. Attivala solo se vuoi salvare prompt e risposte localmente nella vista cronologia. Gli elementi di sessione restano comunque solo in memoria."
   settings.debug_logging: "Abilita log di debug"
   settings.debug_logging_warning: "Sconsigliato fuori dai casi di debug: richieste, contesto ed errori possono essere scritti in un file di log locale."
-  settings.health: "Health Check"
+  settings.health: "Health checks"
   settings.models: "Modelli e chiavi"
   settings.model_credits: "Crediti residui"
   settings.credits_infinite: "∞"

@@ -1,11 +1,7 @@
-use base64::Engine as _;
 use eframe::egui;
 use egui::text::{CCursor, CCursorRange};
-use image::codecs::png::PngEncoder;
-use image::ImageEncoder;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
@@ -14,15 +10,25 @@ use crate::backends;
 use crate::backends::PromptMode;
 use crate::backends::ResponseProgress;
 use crate::backends::ResponseProgressSink;
-use crate::backends::{ConversationTurn, HealthCheck, HealthLevel, ImageAttachment, QueryInput};
-use crate::config::Config;
+use crate::backends::{ConversationTurn, ImageAttachment, QueryInput};
+use crate::config::{Config, RagRuntimeOverride};
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
 use crate::prompt_profiles::PromptProfiles;
 use crate::rag::RagSystem;
 use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
-use crate::update::{self, ReleaseInfo, UpdateAction};
+use crate::update::{self, ReleaseInfo};
 use crate::window_context;
+
+mod history_entry;
+mod history_panel;
+mod layout;
+mod media_io;
+mod provider_settings;
+mod rag_settings;
+mod settings_panel;
+mod startup_health;
+mod update_status;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -292,11 +298,6 @@ fn visible_bounds(
     found.then_some((min_x, min_y, max_x, max_y))
 }
 
-struct VoiceRecording {
-    child: Child,
-    path: PathBuf,
-}
-
 type AsyncAvailableModels = Arc<Mutex<Vec<(String, Result<Vec<String>, String>)>>>;
 type AsyncReleaseCheck = Arc<Mutex<Option<Result<ReleaseInfo, String>>>>;
 
@@ -342,95 +343,13 @@ enum ReleaseCheckState {
     Error(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RagRetrievalMode {
-    Keyword,
-    Vector,
-    Hybrid,
-}
-
-impl RagRetrievalMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Keyword => "keyword",
-            Self::Vector => "vector",
-            Self::Hybrid => "hybrid",
-        }
-    }
-
-    fn from_str(value: &str) -> Self {
-        match value {
-            "keyword" => Self::Keyword,
-            "hybrid" => Self::Hybrid,
-            _ => Self::Vector,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RagRuntimeUiOverride {
-    Default,
-    ForceOn,
-    ForceOff,
-}
-
-impl RagRuntimeUiOverride {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::ForceOn => "force_on",
-            Self::ForceOff => "force_off",
-        }
-    }
-
-    fn from_str(value: &str) -> Self {
-        match value {
-            "force_on" => Self::ForceOn,
-            "force_off" => Self::ForceOff,
-            _ => Self::Default,
-        }
-    }
-
-    fn apply_to_prompt(self, prompt: &str) -> String {
-        match self {
-            Self::Default => prompt.to_string(),
-            Self::ForceOn => format!("!rag on {prompt}"),
-            Self::ForceOff => format!("!rag off {prompt}"),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct RagUiSettings {
-    retrieval_mode: RagRetrievalMode,
-    runtime_override: RagRuntimeUiOverride,
-    embedding_backend: String,
-    embedding_model: String,
-}
-
 const SESSION_HISTORY_LIMIT: usize = 24;
-
-fn default_rag_ui_settings(config: &Config) -> RagUiSettings {
-    let embedding_backend = if config.default_backend.trim().is_empty() {
-        "ollama".to_string()
-    } else {
-        config.default_backend.clone()
-    };
-
-    let embedding_model = default_rag_embedding_model(config, &embedding_backend);
-    RagUiSettings {
-        retrieval_mode: RagRetrievalMode::Vector,
-        runtime_override: RagRuntimeUiOverride::Default,
-        embedding_backend,
-        embedding_model,
-    }
-}
 
 fn default_rag_embedding_model(config: &Config, backend: &str) -> String {
     match backend {
         "chatgpt" => "text-embedding-3-small".to_string(),
         "claude" => "claude-embedding-1".to_string(),
-        "gemini" => "text-embedding-004".to_string(),
+        "gemini" => "gemini-embedding-001".to_string(),
         "ollama" => config
             .ollama
             .as_ref()
@@ -441,114 +360,32 @@ fn default_rag_embedding_model(config: &Config, backend: &str) -> String {
     }
 }
 
-fn load_rag_ui_settings(config: &Config, fallback: &RagUiSettings) -> RagUiSettings {
-    let mut settings = fallback.clone();
-
-    let Some(path) = &config.loaded_from else {
-        return settings;
-    };
-
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return settings;
-    };
-    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&raw) else {
-        return settings;
-    };
-
-    let rag_key = serde_yaml::Value::String("rag".to_string());
-    let Some(root) = value.as_mapping() else {
-        return settings;
-    };
-    let Some(rag) = root.get(&rag_key).and_then(serde_yaml::Value::as_mapping) else {
-        return settings;
-    };
-
-    let retrieval_mode_key = serde_yaml::Value::String("retrieval_mode".to_string());
-    if let Some(mode) = rag
-        .get(&retrieval_mode_key)
-        .and_then(serde_yaml::Value::as_str)
-    {
-        settings.retrieval_mode = RagRetrievalMode::from_str(mode);
+fn apply_rag_runtime_override(mode: RagRuntimeOverride, prompt: &str) -> String {
+    match mode {
+        RagRuntimeOverride::Default => prompt.to_string(),
+        RagRuntimeOverride::ForceOn => format!("!rag on {prompt}"),
+        RagRuntimeOverride::ForceOff => format!("!rag off {prompt}"),
     }
-
-    let runtime_override_key = serde_yaml::Value::String("runtime_override".to_string());
-    if let Some(value) = rag
-        .get(&runtime_override_key)
-        .and_then(serde_yaml::Value::as_str)
-    {
-        settings.runtime_override = RagRuntimeUiOverride::from_str(value);
-    }
-
-    let embedding_backend_key = serde_yaml::Value::String("embedding_backend".to_string());
-    if let Some(backend) = rag
-        .get(&embedding_backend_key)
-        .and_then(serde_yaml::Value::as_str)
-    {
-        let backend = backend.trim();
-        if !backend.is_empty() {
-            settings.embedding_backend = backend.to_string();
-        }
-    }
-
-    let embedding_model_key = serde_yaml::Value::String("embedding_model".to_string());
-    if let Some(model) = rag
-        .get(&embedding_model_key)
-        .and_then(serde_yaml::Value::as_str)
-    {
-        let model = model.trim();
-        if !model.is_empty() {
-            settings.embedding_model = model.to_string();
-        }
-    }
-
-    settings
 }
 
-fn save_rag_ui_settings(path: &Path, settings: &RagUiSettings) -> Result<(), String> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|err| format!("Could not read settings file {}: {err}", path.display()))?;
-    let mut value: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .map_err(|err| format!("Could not parse settings file {}: {err}", path.display()))?;
+fn rag_embedding_backend(config: &Config) -> String {
+    config
+        .rag
+        .embedding_backend
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "ollama".to_string())
+}
 
-    let root = value
-        .as_mapping_mut()
-        .ok_or_else(|| format!("Settings file {} is not a YAML mapping.", path.display()))?;
-    let rag_key = serde_yaml::Value::String("rag".to_string());
-    let rag_value = root
-        .entry(rag_key)
-        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
-    let rag = rag_value.as_mapping_mut().ok_or_else(|| {
-        format!(
-            "The `rag` section in {} is not a YAML mapping.",
-            path.display()
-        )
-    })?;
-
-    rag.insert(
-        serde_yaml::Value::String("retrieval_mode".to_string()),
-        serde_yaml::Value::String(settings.retrieval_mode.as_str().to_string()),
-    );
-    rag.insert(
-        serde_yaml::Value::String("runtime_override".to_string()),
-        serde_yaml::Value::String(settings.runtime_override.as_str().to_string()),
-    );
-    rag.insert(
-        serde_yaml::Value::String("embedding_backend".to_string()),
-        serde_yaml::Value::String(settings.embedding_backend.clone()),
-    );
-    rag.insert(
-        serde_yaml::Value::String("embedding_model".to_string()),
-        serde_yaml::Value::String(settings.embedding_model.clone()),
-    );
-
-    let serialized = serde_yaml::to_string(&value).map_err(|err| {
-        format!(
-            "Could not serialize settings file {}: {err}",
-            path.display()
-        )
-    })?;
-    std::fs::write(path, serialized)
-        .map_err(|err| format!("Could not write settings file {}: {err}", path.display()))
+fn rag_embedding_model(config: &Config, backend: &str) -> String {
+    config
+        .rag
+        .embedding_model
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| default_rag_embedding_model(config, backend))
 }
 
 pub struct AiPopupApp {
@@ -567,7 +404,7 @@ pub struct AiPopupApp {
     is_loading: bool,
     auto_copy_close_after_response: bool,
     dictation_status: Option<String>,
-    voice_recording: Option<VoiceRecording>,
+    voice_recording: Option<media_io::VoiceRecording>,
     prompt_focus_initialized: bool,
     prompt_editor_height: f32,
     response_editor_height: f32,
@@ -585,7 +422,6 @@ pub struct AiPopupApp {
     settings_error: Option<String>,
     settings_notice: Option<String>,
     show_settings: bool,
-    rag_ui: RagUiSettings,
     pending_submission: Option<(String, String)>,
     last_submitted_request: Option<RequestFingerprint>,
     first_run_template: String,
@@ -642,9 +478,9 @@ impl AiPopupApp {
         };
 
         let fallback_theme_name = config.theme.name.clone();
-        let prompt_editor_height = default_prompt_editor_height(config.ui.window_height);
-        let response_editor_height = default_response_editor_height(config.ui.window_height);
-        let rag_ui = default_rag_ui_settings(&config);
+        let prompt_editor_height = layout::default_prompt_editor_height(config.ui.window_height);
+        let response_editor_height =
+            layout::default_response_editor_height(config.ui.window_height);
         let first_run_template = app_paths::discover_config_template_names()
             .ok()
             .and_then(|names| {
@@ -688,7 +524,6 @@ impl AiPopupApp {
             settings_error: None,
             settings_notice: None,
             show_settings: false,
-            rag_ui,
             pending_submission: None,
             last_submitted_request: None,
             first_run_template,
@@ -708,7 +543,6 @@ impl AiPopupApp {
             last_completed_request: None,
             rag_index_in_progress: false,
         };
-        app.rag_ui = load_rag_ui_settings(&app.config, &app.rag_ui);
         app.start_release_check(&cc.egui_ctx);
         app
     }
@@ -912,7 +746,7 @@ impl AiPopupApp {
         self.is_loading = true;
         self.response = format!("⏳ Querying {}…", self.selected_backend);
 
-        let prompt = self.rag_ui.runtime_override.apply_to_prompt(&self.prompt);
+        let prompt = apply_rag_runtime_override(self.config.rag.runtime_override, &self.prompt);
         let images = self.attachments.clone();
         let conversation = if self.session_chat_enabled {
             self.session_conversation.clone()
@@ -1082,7 +916,7 @@ impl AiPopupApp {
         if self.show_history {
             self.reload_history();
         }
-        sync_main_viewport(
+        layout::sync_main_viewport(
             ctx,
             self.show_history,
             self.show_settings,
@@ -1093,7 +927,7 @@ impl AiPopupApp {
 
     fn set_settings_visibility(&mut self, ctx: &egui::Context, visible: bool) {
         self.show_settings = visible;
-        sync_main_viewport(
+        layout::sync_main_viewport(
             ctx,
             self.show_history,
             self.show_settings,
@@ -1176,25 +1010,8 @@ impl AiPopupApp {
     fn persist_settings(&mut self) {
         match self.config.save() {
             Ok(()) => {
-                let Some(path) = self.config.loaded_from.clone() else {
-                    self.settings_notice = Some(self.tr("app.settings_save_ok"));
-                    self.settings_error = None;
-                    return;
-                };
-
-                match save_rag_ui_settings(&path, &self.rag_ui) {
-                    Ok(()) => {
-                        self.settings_notice = Some(self.tr("app.settings_save_ok"));
-                        self.settings_error = None;
-                    }
-                    Err(err) => {
-                        self.settings_error = Some(self.tr_with(
-                            "app.settings_save_error_with_path",
-                            &[("path", path.display().to_string()), ("error", err)],
-                        ));
-                        self.settings_notice = None;
-                    }
-                }
+                self.settings_notice = Some(self.tr("app.settings_save_ok"));
+                self.settings_error = None;
             }
             Err(err) => {
                 let save_path = self.config.loaded_from.clone().unwrap_or_else(|| {
@@ -1296,7 +1113,6 @@ impl AiPopupApp {
         match Config::load() {
             Ok(config) => {
                 self.config = config;
-                self.rag_ui = load_rag_ui_settings(&self.config, &self.rag_ui);
                 self.selected_backend = self.config.default_backend.clone();
                 self.prompt_profiles = PromptProfiles::load(&self.config)
                     .unwrap_or_else(|_| PromptProfiles::default_built_in());
@@ -1334,7 +1150,7 @@ impl AiPopupApp {
             .add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif"])
             .pick_file()
         {
-            match load_image_attachment_from_path(&path) {
+            match media_io::load_image_attachment_from_path(&path) {
                 Ok(image) => {
                     self.attachments.push(image);
                     self.attachment_notice = Some(self.tr_with(
@@ -1357,7 +1173,7 @@ impl AiPopupApp {
     }
 
     fn try_attach_image_from_clipboard(&mut self, report_errors: bool) -> Result<bool, String> {
-        match load_image_attachment_from_clipboard() {
+        match media_io::load_image_attachment_from_clipboard() {
             Ok(image) => {
                 self.attachments.push(image);
                 self.attachment_notice = Some(self.tr_with(
@@ -1392,7 +1208,7 @@ impl AiPopupApp {
     }
 
     fn start_dictation(&mut self) {
-        match begin_voice_recording() {
+        match media_io::begin_voice_recording() {
             Ok(recording) => {
                 self.voice_recording = Some(recording);
                 self.dictation_status = Some(self.tr("app.voice_recording"));
@@ -1408,7 +1224,7 @@ impl AiPopupApp {
             return;
         };
 
-        let wav_bytes = match finish_voice_recording(recording) {
+        let wav_bytes = match media_io::finish_voice_recording(recording) {
             Ok(bytes) => bytes,
             Err(err) => {
                 self.dictation_status = Some(if err.is_empty() {
@@ -1436,7 +1252,7 @@ impl AiPopupApp {
             return;
         }
 
-        copy_text_to_clipboard(&self.response);
+        media_io::copy_text_to_clipboard(&self.response);
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
@@ -1511,7 +1327,7 @@ impl eframe::App for AiPopupApp {
         self.refresh_toolbar_icon_textures_if_needed(ctx);
         self.check_async_response(ctx);
         self.ensure_config_sections();
-        sync_main_viewport(
+        layout::sync_main_viewport(
             ctx,
             self.show_history,
             self.show_settings,
@@ -1553,7 +1369,7 @@ fn show_settings_side_panel(app: &mut AiPopupApp, ctx: &egui::Context) {
             app.theme.border_color,
         ))
         .show(ctx, |ui| {
-            render_settings_panel(app, ctx, ui);
+            settings_panel::render_settings_panel(app, ctx, ui);
         });
 }
 
@@ -1577,12 +1393,12 @@ fn render_main_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::U
 
                 if !app.session_history_entries.is_empty() {
                     ui.add_space(16.0);
-                    render_session_history_section(app, ctx, ui);
+                    history_panel::render_session_history_section(app, ctx, ui);
                 }
 
                 if app.show_history {
                     ui.add_space(16.0);
-                    render_persistent_history_section(app, ctx, ui);
+                    history_panel::render_persistent_history_section(app, ctx, ui);
                 }
             });
         });
@@ -1615,218 +1431,6 @@ fn status_section_has_content_state(
         || has_settings_error
 }
 
-fn render_startup_health_section(app: &AiPopupApp, ui: &mut egui::Ui) {
-    let diagnostics = backends::startup_health_checks(&app.config, &app.selected_backend);
-
-    card_frame(
-        ui.ctx(),
-        app.theme.panel_fill_soft,
-        app.theme.border_color.gamma_multiply(0.65),
-    )
-    .show(ui, |ui| {
-        for (index, diagnostic) in diagnostics.iter().enumerate() {
-            render_startup_health_row(app, ui, diagnostic);
-            if index + 1 < diagnostics.len() {
-                ui.add_space(8.0);
-            }
-        }
-    });
-}
-
-fn render_first_run_setup_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
-    let config_path = app_paths::default_config_path();
-    let create_enabled = config_path.is_ok();
-    let template_names = app_paths::discover_config_template_names().unwrap_or_default();
-
-    card_frame(
-        ui.ctx(),
-        app.theme.panel_fill_soft,
-        app.theme.border_color.gamma_multiply(0.65),
-    )
-    .show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(section_label(
-                &app.tr("startup.first_run_setup"),
-                app.theme.text_color,
-            ));
-        });
-        ui.add_space(6.0);
-
-        match &config_path {
-            Ok(path) => {
-                ui.label(
-                    egui::RichText::new(app.tr_with(
-                        "startup.config_destination",
-                        &[("path", path.display().to_string())],
-                    ))
-                    .small()
-                    .color(app.theme.weak_text_color),
-                );
-            }
-            Err(err) => {
-                ui.colored_label(
-                    app.theme.danger_color,
-                    app.tr_with(
-                        "startup.config_destination_error",
-                        &[("error", err.to_string())],
-                    ),
-                );
-            }
-        }
-
-        if !template_names.is_empty() {
-            ui.add_space(6.0);
-            ui.label(muted_label(
-                &app.tr("startup.config_templates"),
-                app.theme.weak_text_color,
-            ));
-
-            let template_theme = app.theme.clone();
-            dropdown_box_scope(ui, &template_theme, |ui| {
-                egui::ComboBox::from_id_source("startup_config_template")
-                    .selected_text(dropdown_button_text(
-                        &app.first_run_template,
-                        &template_theme,
-                    ))
-                    .width(220.0)
-                    .show_ui(ui, |ui| {
-                        apply_dropdown_menu_style(ui, &template_theme);
-                        for template_name in template_names.iter() {
-                            if ui
-                                .selectable_label(
-                                    app.first_run_template == *template_name,
-                                    dropdown_item_text(template_name, &template_theme),
-                                )
-                                .clicked()
-                            {
-                                app.first_run_template = template_name.clone();
-                            }
-                        }
-                    });
-            });
-        }
-
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(
-                    create_enabled,
-                    primary_action_button(
-                        &app.tr("startup.create_config_from_template"),
-                        app.theme.accent_color,
-                        app.theme.accent_text_color,
-                    ),
-                )
-                .clicked()
-            {
-                let template_name = app.first_run_template.clone();
-                app.create_config_from_template(ui.ctx(), &template_name);
-            }
-
-            if ui
-                .add_enabled(
-                    create_enabled,
-                    secondary_action_button(
-                        &app.tr("startup.open_config_folder"),
-                        app.theme.panel_fill_soft,
-                    ),
-                )
-                .clicked()
-            {
-                if let Ok(path) = &config_path {
-                    if let Some(parent) = path.parent() {
-                        app.settings_error = open_path_in_file_manager(parent).err().map(|err| {
-                            app.tr_with(
-                                "startup.open_config_folder_error",
-                                &[("error", err.to_string())],
-                            )
-                        });
-                    }
-                }
-            }
-        });
-
-        if let Some(hint) = startup_first_run_hint(app, &config_path) {
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(hint)
-                    .small()
-                    .color(app.theme.weak_text_color),
-            );
-        }
-    });
-}
-
-fn render_startup_health_row(app: &AiPopupApp, ui: &mut egui::Ui, diagnostic: &HealthCheck) {
-    let label = startup_health_label(app, diagnostic);
-    let status_color = health_level_color(app, &diagnostic.level);
-
-    ui.horizontal_wrapped(|ui| {
-        ui.label(muted_label(&label, app.theme.weak_text_color));
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(&diagnostic.summary)
-                .strong()
-                .color(status_color),
-        );
-    });
-    ui.label(
-        egui::RichText::new(&diagnostic.detail)
-            .small()
-            .color(app.theme.weak_text_color),
-    );
-    if let Some(hint) = startup_recovery_hint(app, diagnostic) {
-        ui.add_space(2.0);
-        ui.label(
-            egui::RichText::new(hint)
-                .small()
-                .color(app.theme.weak_text_color),
-        );
-    }
-}
-
-fn startup_health_label(app: &AiPopupApp, diagnostic: &HealthCheck) -> String {
-    match diagnostic.backend.as_str() {
-        "config" => app.tr("startup.config_source"),
-        "selected-backend" => app.tr("startup.selected_backend"),
-        "dictation-tools" => app.tr("startup.dictation_tools"),
-        "clipboard-tools" => app.tr("startup.clipboard_tools"),
-        _ => diagnostic.backend.clone(),
-    }
-}
-
-fn startup_recovery_hint(app: &AiPopupApp, diagnostic: &HealthCheck) -> Option<String> {
-    if matches!(diagnostic.level, HealthLevel::Ok) {
-        return None;
-    }
-
-    let hint = match diagnostic.backend.as_str() {
-        "config" => app.tr("startup.config_recovery_hint"),
-        "selected-backend" => app.tr("startup.selected_backend_recovery_hint"),
-        "dictation-tools" => app.tr("startup.dictation_tools_recovery_hint"),
-        "clipboard-tools" => app.tr("startup.clipboard_tools_recovery_hint"),
-        _ => return None,
-    };
-
-    Some(hint)
-}
-
-fn startup_first_run_hint(
-    app: &AiPopupApp,
-    config_path: &anyhow::Result<PathBuf>,
-) -> Option<String> {
-    match config_path {
-        Ok(path) => Some(app.tr_with(
-            "startup.first_run_hint",
-            &[("path", path.display().to_string())],
-        )),
-        Err(err) => Some(app.tr_with(
-            "startup.first_run_hint_error",
-            &[("error", err.to_string())],
-        )),
-    }
-}
-
 fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     let backend_label = app.tr("app.backend");
     let generic_mode_label = app.tr("app.generic_mode");
@@ -1853,7 +1457,7 @@ fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui:
         ui.add_space(6.0);
         ui.checkbox(&mut app.session_chat_enabled, session_chat_label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(section_actions_right_inset());
+            ui.add_space(layout::section_actions_right_inset());
             let gear = icon_action_button(
                 app,
                 ToolbarIcon::Settings,
@@ -1874,7 +1478,7 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
     ui.horizontal(|ui| {
         ui.label(section_label(&prompt_section_label, app.theme.text_color));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(section_actions_right_inset());
+            ui.add_space(layout::section_actions_right_inset());
             let send_clicked = ui
                 .add_enabled(
                     !app.is_loading,
@@ -2027,15 +1631,15 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
             && !i.modifiers.shift
             && !i.modifiers.alt
     });
-    let paste_action = ctx.input(|i| classify_prompt_paste_events(&i.events));
+    let paste_action = ctx.input(|i| media_io::classify_prompt_paste_events(&i.events));
 
     if prompt_has_focus {
         if let Some(path) = paste_action.image_path_from_paste {
-            if let Ok(attachment) = load_image_attachment_from_path(&path) {
+            if let Ok(attachment) = media_io::load_image_attachment_from_path(&path) {
                 app.attachments.push(attachment);
                 app.prompt = prompt_before_edit;
             }
-        } else if should_attach_clipboard_image_from_shortcut(
+        } else if media_io::should_attach_clipboard_image_from_shortcut(
             paste_shortcut_pressed,
             &prompt_before_edit,
             &app.prompt,
@@ -2084,7 +1688,7 @@ fn render_status_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
                         egui::RichText::new(format!(
                             "{} ({})",
                             image.name,
-                            format_size(image.size_bytes)
+                            media_io::format_size(image.size_bytes)
                         ))
                         .small()
                         .color(app.theme.text_color),
@@ -2116,14 +1720,6 @@ fn render_status_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
     });
 }
 
-fn health_level_color(app: &AiPopupApp, level: &HealthLevel) -> egui::Color32 {
-    match level {
-        HealthLevel::Ok => app.theme.accent_color,
-        HealthLevel::Warning => egui::Color32::from_rgb(227, 177, 76),
-        HealthLevel::Error => app.theme.danger_color,
-    }
-}
-
 fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     let response_section_label = app.tr("app.response");
 
@@ -2138,7 +1734,7 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(section_actions_right_inset());
+            ui.add_space(layout::section_actions_right_inset());
             let history_count = app.history_entries.len();
             let history_label = if app.show_history {
                 app.tr_with("app.hide_history", &[("count", history_count.to_string())])
@@ -2183,7 +1779,7 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
                 .on_hover_text(app.tr("app.copy_response"))
                 .clicked()
             {
-                copy_text_to_clipboard(&app.response);
+                media_io::copy_text_to_clipboard(&app.response);
             }
         });
     });
@@ -2214,227 +1810,6 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
         response_max_height,
         None,
     );
-}
-
-fn render_session_history_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(section_label(
-            &app.tr("app.session_history"),
-            app.theme.text_color,
-        ));
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(app.tr("app.session_history_note"))
-                .small()
-                .color(app.theme.weak_text_color),
-        );
-    });
-    ui.add_space(8.0);
-
-    card_frame(ctx, app.theme.panel_fill, app.theme.border_color).show(ui, |ui| {
-        render_session_history_entries(app, ctx, ui);
-    });
-}
-
-fn render_persistent_history_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(section_label(
-            &app.tr("app.saved_history"),
-            app.theme.text_color,
-        ));
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(app.tr("app.saved_history_note"))
-                .small()
-                .color(app.theme.weak_text_color),
-        );
-    });
-    ui.add_space(8.0);
-
-    card_frame(ctx, app.theme.panel_fill, app.theme.border_color).show(ui, |ui| {
-        render_persistent_history_actions(app, ui);
-
-        if let Some(error) = &app.history_error {
-            ui.add_space(8.0);
-            ui.colored_label(app.theme.danger_color, error);
-        } else if let Some(error) = &app.history_action_error {
-            ui.add_space(8.0);
-            ui.colored_label(app.theme.danger_color, error);
-        }
-
-        ui.add_space(12.0);
-        render_saved_history_entries(app, ctx, ui);
-    });
-}
-
-fn render_persistent_history_actions(app: &mut AiPopupApp, ui: &mut egui::Ui) {
-    let all_backends = app.tr("app.all_backends");
-    let history_search_hint = app.tr("app.search_history");
-    let open_history_label = app.tr("app.open_saved_history_file");
-    let select_all_label = app.tr("app.select_all");
-    let delete_all_label = app.tr("app.delete_all");
-    let delete_selected_label = app.tr_with(
-        "app.delete_selected",
-        &[("count", app.selected_history_entries.len().to_string())],
-    );
-
-    ui.horizontal_wrapped(|ui| {
-        dropdown_box_scope(ui, &app.theme, |ui| {
-            egui::ComboBox::from_id_source("history_backend_filter")
-                .selected_text(selected_history_backend_label(
-                    &app.history_filter_backend,
-                    &all_backends,
-                    &app.theme,
-                ))
-                .width(150.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &app.theme);
-                    ui.selectable_value(
-                        &mut app.history_filter_backend,
-                        "all".to_string(),
-                        dropdown_item_text(all_backends.as_str(), &app.theme),
-                    );
-                    dropdown_option(ui, &mut app.history_filter_backend, "chatgpt", &app.theme);
-                    dropdown_option(ui, &mut app.history_filter_backend, "claude", &app.theme);
-                    dropdown_option(ui, &mut app.history_filter_backend, "gemini", &app.theme);
-                    dropdown_option(ui, &mut app.history_filter_backend, "ollama", &app.theme);
-                });
-        });
-        ui.add(
-            egui::TextEdit::singleline(&mut app.history_filter_query)
-                .hint_text(history_search_hint)
-                .desired_width(280.0),
-        );
-        if ui
-            .add(secondary_action_button(
-                &open_history_label,
-                app.theme.panel_fill_soft,
-            ))
-            .clicked()
-        {
-            app.history_action_error = open_history_file().err().map(|err| err.to_string());
-        }
-        if ui
-            .add(secondary_action_button(
-                &select_all_label,
-                app.theme.panel_fill_soft,
-            ))
-            .clicked()
-        {
-            app.select_all_visible_history_entries();
-        }
-        if ui
-            .add_enabled(
-                !app.selected_history_entries.is_empty(),
-                secondary_action_button(&delete_selected_label, app.theme.panel_fill_soft),
-            )
-            .clicked()
-        {
-            app.delete_selected_history_entries();
-        }
-        if ui
-            .add(secondary_action_button(
-                &delete_all_label,
-                app.theme.panel_fill_soft,
-            ))
-            .clicked()
-        {
-            app.delete_all_visible_history_entries();
-        }
-    });
-}
-
-fn render_session_history_entries(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    if app.session_history_entries.is_empty() {
-        return;
-    }
-
-    ui.label(
-        egui::RichText::new(app.tr("app.session_history"))
-            .strong()
-            .color(app.theme.text_color),
-    );
-    ui.add_space(8.0);
-
-    for entry in app.session_history_entries.iter().take(5) {
-        history_entry_card(
-            &app.tr("app.copy_result"),
-            &app.tr("app.reuse_entry"),
-            &app.tr("app.select_entry"),
-            &app.tr("app.history_prompt"),
-            &app.tr("app.history_response"),
-            false,
-            ui,
-            ctx,
-            &app.theme,
-            entry,
-            &mut app.selected_history_entries,
-            &mut app.prompt,
-            &mut app.response,
-            &mut app.show_history,
-            &mut app.prompt_focus_initialized,
-            &mut app.history_action_error,
-        );
-        ui.add_space(8.0);
-    }
-
-    ui.separator();
-    ui.add_space(12.0);
-}
-
-fn render_saved_history_entries(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    let entries = app.filtered_history_entries();
-    if entries.is_empty() {
-        ui.label(
-            egui::RichText::new(app.tr("app.no_saved_history")).color(app.theme.weak_text_color),
-        );
-        return;
-    }
-
-    let history_height = ui.available_height().clamp(240.0, 380.0);
-    egui::ScrollArea::vertical()
-        .id_source("history_entries_scroll")
-        .auto_shrink([false; 2])
-        .max_height(history_height)
-        .show(ui, |ui| {
-            for (index, entry) in entries.iter().enumerate() {
-                history_entry_card(
-                    &app.tr("app.copy_result"),
-                    &app.tr("app.reuse_entry"),
-                    &app.tr("app.select_entry"),
-                    &app.tr("app.history_prompt"),
-                    &app.tr("app.history_response"),
-                    true,
-                    ui,
-                    ctx,
-                    &app.theme,
-                    entry,
-                    &mut app.selected_history_entries,
-                    &mut app.prompt,
-                    &mut app.response,
-                    &mut app.show_history,
-                    &mut app.prompt_focus_initialized,
-                    &mut app.history_action_error,
-                );
-                if index + 1 < entries.len() {
-                    ui.add_space(10.0);
-                }
-            }
-        });
-}
-
-fn selected_history_backend_label<'a>(
-    selected: &'a str,
-    all_backends_label: &'a str,
-    theme: &ResolvedTheme,
-) -> egui::RichText {
-    match selected {
-        "chatgpt" => dropdown_button_text("chatgpt", theme),
-        "claude" => dropdown_button_text("claude", theme),
-        "gemini" => dropdown_button_text("gemini", theme),
-        "ollama" => dropdown_button_text("ollama", theme),
-        _ => dropdown_button_text(all_backends_label, theme),
-    }
 }
 
 fn section_label(text: &str, color: egui::Color32) -> egui::RichText {
@@ -2985,81 +2360,6 @@ fn input_frame(ctx: &egui::Context, fill: egui::Color32) -> egui::Frame {
         .inner_margin(egui::Margin::same(9.0))
 }
 
-fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    ui.vertical(|ui| {
-        ui.horizontal(|ui| {
-            ui.label(section_label(&app.tr("app.settings"), app.theme.text_color));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add(icon_action_button(
-                        app,
-                        ToolbarIcon::Close,
-                        app.theme.panel_fill_soft,
-                        app.theme.text_color,
-                    ))
-                    .on_hover_text(app.tr("settings.close"))
-                    .clicked()
-                {
-                    app.set_settings_visibility(ctx, false);
-                }
-            });
-        });
-        if let Some(path) = &app.config.loaded_from {
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(
-                    app.tr_with("app.config_path", &[("path", path.display().to_string())]),
-                )
-                .small()
-                .color(app.theme.weak_text_color),
-            );
-        }
-        ui.add_space(10.0);
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                render_startup_settings_section(app, ui);
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(12.0);
-                render_general_settings_section(app, ctx, ui);
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(12.0);
-                render_rag_settings_section(app, ctx, ui);
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(12.0);
-                render_history_debug_settings_section(app, ui);
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(12.0);
-                render_provider_settings_sections(app, ctx, ui);
-
-                ui.add_space(8.0);
-                ui.label(muted_label(
-                    &app.tr("settings.saved"),
-                    app.theme.weak_text_color,
-                ));
-                ui.add_space(2.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} v{}",
-                            app.tr("settings.version"),
-                            display_version()
-                        ))
-                        .small()
-                        .color(app.theme.weak_text_color),
-                    );
-                    ui.add_space(8.0);
-                    render_update_status(app, ctx, ui);
-                });
-            });
-    });
-}
-
 fn render_startup_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new(
         egui::RichText::new(app.tr("settings.health"))
@@ -3069,828 +2369,200 @@ fn render_startup_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
     .id_source("settings_startup_health")
     .default_open(false)
     .show(ui, |ui| {
-        render_startup_health_section(app, ui);
+        startup_health::render_startup_health_section(app, ui);
 
         if app.config.loaded_from.is_none() {
             ui.add_space(12.0);
-            render_first_run_setup_section(app, ui);
+            startup_health::render_first_run_setup_section(app, ui);
         }
     });
 }
 
 fn render_update_status(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    match &app.release_check_state {
-        ReleaseCheckState::Checking => {
-            ui.label(
-                egui::RichText::new(app.tr("settings.update_checking"))
-                    .small()
-                    .color(app.theme.weak_text_color),
-            );
-        }
-        ReleaseCheckState::UpToDate { latest_version } => {
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} (v{})",
-                    app.tr("settings.update_current"),
-                    latest_version
-                ))
-                .small()
-                .color(app.theme.weak_text_color),
-            );
-        }
-        ReleaseCheckState::UpdateAvailable(release) => {
-            let guide = update::current_platform_update_guide();
-            ui.vertical(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(
-                        egui::RichText::new(app.tr_with(
-                            "settings.update_available",
-                            &[("version", release.version.clone())],
-                        ))
-                        .small()
-                        .color(app.theme.accent_color),
-                    );
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(app.tr_with(
-                            "settings.update_guided_platform",
-                            &[("platform", guide.platform_label.clone())],
-                        ))
-                        .small()
-                        .color(app.theme.weak_text_color),
-                    );
-                });
-                ui.add_space(2.0);
-                ui.label(
-                    egui::RichText::new(guide.detail.clone())
-                        .small()
-                        .color(app.theme.weak_text_color),
-                );
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add(icon_action_button_sized(
-                            app,
-                            ToolbarIcon::Update,
-                            app.theme.accent_color,
-                            app.theme.accent_text_color,
-                            egui::vec2(20.0, 20.0),
-                        ))
-                        .on_hover_text(app.tr("settings.update_open_download"))
-                        .clicked()
-                    {
-                        open_url(ctx, release.release_url.clone());
-                    }
-
-                    match &guide.action {
-                        UpdateAction::CopyCommand { command } => {
-                            if ui
-                                .add(secondary_action_button(
-                                    &app.tr("settings.update_copy_command"),
-                                    app.theme.panel_fill_soft,
-                                ))
-                                .clicked()
-                            {
-                                copy_text_to_clipboard(command);
-                            }
-                        }
-                        UpdateAction::OpenReleasePage => {
-                            if ui
-                                .add(secondary_action_button(
-                                    &app.tr("settings.update_open_release_page"),
-                                    app.theme.panel_fill_soft,
-                                ))
-                                .clicked()
-                            {
-                                open_url(ctx, release.release_url.clone());
-                            }
-                        }
-                    }
-                });
-            });
-        }
-        ReleaseCheckState::Error(error) => {
-            ui.label(
-                egui::RichText::new(app.tr("settings.update_error"))
-                    .small()
-                    .color(app.theme.weak_text_color),
-            )
-            .on_hover_text(error);
-        }
-    }
+    update_status::render_update_status(app, ctx, ui);
 }
 
 fn render_general_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    ui.label(section_label(
-        &app.tr("settings.general"),
-        app.theme.text_color,
-    ));
-
-    ui.label(muted_label(
-        &app.tr("settings.language"),
-        app.theme.weak_text_color,
-    ));
-    let current_language = app
-        .available_locales
-        .iter()
-        .find(|locale| locale.code == app.i18n.code())
-        .map(|locale| locale.name.clone())
-        .unwrap_or_else(|| app.i18n.language_name().to_string());
-    let dropdown_theme = app.theme.clone();
-    dropdown_box_scope(ui, &dropdown_theme, |ui| {
-        egui::ComboBox::from_id_source("settings_language")
-            .selected_text(dropdown_button_text(&current_language, &dropdown_theme))
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                apply_dropdown_menu_style(ui, &dropdown_theme);
-                let locales: Vec<(String, String)> = app
-                    .available_locales
-                    .iter()
-                    .map(|locale| (locale.code.clone(), locale.name.clone()))
-                    .collect();
-                for (code, name) in locales {
-                    if ui
-                        .selectable_label(
-                            app.config.ui.language == code,
-                            dropdown_item_text(&name, &dropdown_theme),
-                        )
-                        .clicked()
-                    {
-                        app.apply_language(&code);
-                        app.persist_settings();
-                    }
-                }
-            });
-    });
-
-    ui.add_space(8.0);
-    ui.label(muted_label(
-        &app.tr("settings.theme"),
-        app.theme.weak_text_color,
-    ));
-    let current_theme = app.config.theme.name.clone();
-    let dropdown_theme = app.theme.clone();
-    dropdown_box_scope(ui, &dropdown_theme, |ui| {
-        egui::ComboBox::from_id_source("settings_theme")
-            .selected_text(dropdown_button_text(&current_theme, &dropdown_theme))
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                apply_dropdown_menu_style(ui, &dropdown_theme);
-                let themes = app.available_themes.clone();
-                for theme_name in themes {
-                    if ui
-                        .selectable_label(
-                            app.config.theme.name == theme_name,
-                            dropdown_item_text(&theme_name, &dropdown_theme),
-                        )
-                        .clicked()
-                    {
-                        app.apply_theme_by_name(ctx, &theme_name);
-                        app.persist_settings();
-                    }
-                }
-            });
-    });
-
-    ui.add_space(8.0);
-    ui.label(muted_label(
-        &app.tr("settings.default_backend"),
-        app.theme.weak_text_color,
-    ));
-    let dropdown_theme = app.theme.clone();
-    dropdown_box_scope(ui, &dropdown_theme, |ui| {
-        egui::ComboBox::from_id_source("settings_default_backend")
-            .selected_text(dropdown_button_text(
-                &app.config.default_backend,
-                &dropdown_theme,
-            ))
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                apply_dropdown_menu_style(ui, &dropdown_theme);
-                for backend in ["ollama", "chatgpt", "claude", "gemini"] {
-                    if ui
-                        .selectable_label(
-                            app.config.default_backend == backend,
-                            dropdown_item_text(backend, &dropdown_theme),
-                        )
-                        .clicked()
-                    {
-                        app.config.default_backend = backend.to_string();
-                        app.selected_backend = backend.to_string();
-                        app.persist_settings();
-                    }
-                }
-            });
-    });
-
-    ui.add_space(8.0);
-    let mut auto_read = app.config.auto_read_selection;
-    if ui
-        .checkbox(&mut auto_read, app.tr("settings.auto_read_selection"))
-        .changed()
-    {
-        app.config.auto_read_selection = auto_read;
-        app.persist_settings();
-    }
-
-    ui.add_space(8.0);
-    let mut update_beta = app.config.update.beta;
-    if ui
-        .checkbox(&mut update_beta, app.tr("settings.update_beta_channel"))
-        .changed()
-    {
-        app.config.update.beta = update_beta;
-        app.persist_settings();
-        app.start_release_check(ctx);
-    }
-    ui.label(muted_label(
-        &app.tr("settings.update_beta_channel_hint"),
-        app.theme.weak_text_color,
-    ));
-}
-
-fn render_history_debug_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
-    ui.label(section_label(
-        &app.tr("settings.history_debug"),
-        app.theme.text_color,
-    ));
-
-    let mut history_enabled = app.config.history.enabled;
-    if ui
-        .checkbox(&mut history_enabled, app.tr("settings.history_enabled"))
-        .changed()
-    {
-        app.config.history.enabled = history_enabled;
-        if !history_enabled {
-            app.show_history = false;
-        }
-        app.reload_history();
-        app.persist_settings();
-    }
-    ui.label(muted_label(
-        &app.tr("settings.history_warning"),
-        app.theme.weak_text_color,
-    ));
-
-    ui.add_space(8.0);
-    let mut debug_logging = app.config.logging.enabled;
-    if ui
-        .checkbox(&mut debug_logging, app.tr("settings.debug_logging"))
-        .changed()
-    {
-        app.config.logging.enabled = debug_logging;
-        app.persist_settings();
-    }
-    ui.label(muted_label(
-        &app.tr("settings.debug_logging_warning"),
-        app.theme.weak_text_color,
-    ));
-}
-
-fn render_rag_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new(
-        egui::RichText::new(app.tr("settings.rag"))
+        egui::RichText::new(app.tr("settings.general"))
             .color(app.theme.text_color)
             .strong(),
     )
-    .id_source("settings_rag")
-    .default_open(false)
+    .id_source("settings_general")
+    .default_open(true)
     .show(ui, |ui| {
-        let mut enabled = app.config.rag.enabled;
+        ui.label(muted_label(
+            &app.tr("settings.language"),
+            app.theme.weak_text_color,
+        ));
+        let current_language = app
+            .available_locales
+            .iter()
+            .find(|locale| locale.code == app.i18n.code())
+            .map(|locale| locale.name.clone())
+            .unwrap_or_else(|| app.i18n.language_name().to_string());
+        let dropdown_theme = app.theme.clone();
+        dropdown_box_scope(ui, &dropdown_theme, |ui| {
+            egui::ComboBox::from_id_source("settings_language")
+                .selected_text(dropdown_button_text(&current_language, &dropdown_theme))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    apply_dropdown_menu_style(ui, &dropdown_theme);
+                    let locales: Vec<(String, String)> = app
+                        .available_locales
+                        .iter()
+                        .map(|locale| (locale.code.clone(), locale.name.clone()))
+                        .collect();
+                    for (code, name) in locales {
+                        if ui
+                            .selectable_label(
+                                app.config.ui.language == code,
+                                dropdown_item_text(&name, &dropdown_theme),
+                            )
+                            .clicked()
+                        {
+                            app.apply_language(&code);
+                            app.persist_settings();
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(8.0);
+        ui.label(muted_label(
+            &app.tr("settings.theme"),
+            app.theme.weak_text_color,
+        ));
+        let current_theme = app.config.theme.name.clone();
+        let dropdown_theme = app.theme.clone();
+        dropdown_box_scope(ui, &dropdown_theme, |ui| {
+            egui::ComboBox::from_id_source("settings_theme")
+                .selected_text(dropdown_button_text(&current_theme, &dropdown_theme))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    apply_dropdown_menu_style(ui, &dropdown_theme);
+                    let themes = app.available_themes.clone();
+                    for theme_name in themes {
+                        if ui
+                            .selectable_label(
+                                app.config.theme.name == theme_name,
+                                dropdown_item_text(&theme_name, &dropdown_theme),
+                            )
+                            .clicked()
+                        {
+                            app.apply_theme_by_name(ctx, &theme_name);
+                            app.persist_settings();
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(8.0);
+        ui.label(muted_label(
+            &app.tr("settings.default_backend"),
+            app.theme.weak_text_color,
+        ));
+        let dropdown_theme = app.theme.clone();
+        dropdown_box_scope(ui, &dropdown_theme, |ui| {
+            egui::ComboBox::from_id_source("settings_default_backend")
+                .selected_text(dropdown_button_text(
+                    &app.config.default_backend,
+                    &dropdown_theme,
+                ))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    apply_dropdown_menu_style(ui, &dropdown_theme);
+                    for backend in ["ollama", "chatgpt", "claude", "gemini"] {
+                        if ui
+                            .selectable_label(
+                                app.config.default_backend == backend,
+                                dropdown_item_text(backend, &dropdown_theme),
+                            )
+                            .clicked()
+                        {
+                            app.config.default_backend = backend.to_string();
+                            app.selected_backend = backend.to_string();
+                            app.persist_settings();
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(8.0);
+        let mut auto_read = app.config.auto_read_selection;
         if ui
-            .checkbox(&mut enabled, app.tr("settings.rag_enabled"))
+            .checkbox(&mut auto_read, app.tr("settings.auto_read_selection"))
             .changed()
         {
-            app.config.rag.enabled = enabled;
+            app.config.auto_read_selection = auto_read;
             app.persist_settings();
         }
 
         ui.add_space(8.0);
-        ui.label(muted_label(
-            &app.tr("settings.rag_retrieval_mode"),
-            app.theme.weak_text_color,
-        ));
-        let retrieval_mode_label = match app.rag_ui.retrieval_mode {
-            RagRetrievalMode::Keyword => app.tr("settings.rag_mode_keyword"),
-            RagRetrievalMode::Vector => app.tr("settings.rag_mode_vector"),
-            RagRetrievalMode::Hybrid => app.tr("settings.rag_mode_hybrid"),
-        };
-        let retrieval_mode_theme = app.theme.clone();
-        dropdown_box_scope(ui, &retrieval_mode_theme, |ui| {
-            egui::ComboBox::from_id_source("settings_rag_retrieval_mode")
-                .selected_text(dropdown_button_text(
-                    &retrieval_mode_label,
-                    &retrieval_mode_theme,
-                ))
-                .width(220.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &retrieval_mode_theme);
-                    let options = [
-                        (RagRetrievalMode::Keyword, "settings.rag_mode_keyword"),
-                        (RagRetrievalMode::Vector, "settings.rag_mode_vector"),
-                        (RagRetrievalMode::Hybrid, "settings.rag_mode_hybrid"),
-                    ];
-                    for (mode, label_key) in options {
-                        if ui
-                            .selectable_label(
-                                app.rag_ui.retrieval_mode == mode,
-                                dropdown_item_text(&app.tr(label_key), &retrieval_mode_theme),
-                            )
-                            .clicked()
-                        {
-                            app.rag_ui.retrieval_mode = mode;
-                            app.persist_settings();
-                        }
-                    }
-                });
-        });
-
-        ui.add_space(8.0);
-        ui.label(muted_label(
-            &app.tr("settings.rag_runtime_override"),
-            app.theme.weak_text_color,
-        ));
-        let runtime_override_label = match app.rag_ui.runtime_override {
-            RagRuntimeUiOverride::Default => app.tr("settings.rag_runtime_default"),
-            RagRuntimeUiOverride::ForceOn => app.tr("settings.rag_runtime_force_on"),
-            RagRuntimeUiOverride::ForceOff => app.tr("settings.rag_runtime_force_off"),
-        };
-        let runtime_override_theme = app.theme.clone();
-        dropdown_box_scope(ui, &runtime_override_theme, |ui| {
-            egui::ComboBox::from_id_source("settings_rag_runtime_override")
-                .selected_text(dropdown_button_text(
-                    &runtime_override_label,
-                    &runtime_override_theme,
-                ))
-                .width(220.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &runtime_override_theme);
-                    let options = [
-                        (
-                            RagRuntimeUiOverride::Default,
-                            "settings.rag_runtime_default",
-                        ),
-                        (
-                            RagRuntimeUiOverride::ForceOn,
-                            "settings.rag_runtime_force_on",
-                        ),
-                        (
-                            RagRuntimeUiOverride::ForceOff,
-                            "settings.rag_runtime_force_off",
-                        ),
-                    ];
-                    for (mode, label_key) in options {
-                        if ui
-                            .selectable_label(
-                                app.rag_ui.runtime_override == mode,
-                                dropdown_item_text(&app.tr(label_key), &runtime_override_theme),
-                            )
-                            .clicked()
-                        {
-                            app.rag_ui.runtime_override = mode;
-                            app.persist_settings();
-                        }
-                    }
-                });
-        });
-
-        if app.rag_ui.retrieval_mode != RagRetrievalMode::Keyword {
-            ui.add_space(8.0);
-            ui.label(muted_label(
-                &app.tr("settings.rag_embedding_backend"),
-                app.theme.weak_text_color,
-            ));
-            let backend_theme = app.theme.clone();
-            dropdown_box_scope(ui, &backend_theme, |ui| {
-                egui::ComboBox::from_id_source("settings_rag_embedding_backend")
-                    .selected_text(dropdown_button_text(
-                        &app.rag_ui.embedding_backend,
-                        &backend_theme,
-                    ))
-                    .width(220.0)
-                    .show_ui(ui, |ui| {
-                        apply_dropdown_menu_style(ui, &backend_theme);
-                        for backend in ["ollama", "chatgpt", "claude", "gemini"] {
-                            if ui
-                                .selectable_label(
-                                    app.rag_ui.embedding_backend == backend,
-                                    dropdown_item_text(backend, &backend_theme),
-                                )
-                                .clicked()
-                            {
-                                app.rag_ui.embedding_backend = backend.to_string();
-                                if app.rag_ui.embedding_model.trim().is_empty() {
-                                    app.rag_ui.embedding_model =
-                                        default_rag_embedding_model(&app.config, backend);
-                                }
-                                app.persist_settings();
-                            }
-                        }
-                    });
-            });
-
-            ui.add_space(8.0);
-            if settings_text_field(
-                ui,
-                &app.theme,
-                &app.tr("settings.rag_embedding_model"),
-                &mut app.rag_ui.embedding_model,
-                false,
-            ) {
-                app.persist_settings();
-            }
-        }
-
-        ui.add_space(8.0);
-        ui.label(muted_label(
-            &app.tr("settings.rag_documents_folder"),
-            app.theme.weak_text_color,
-        ));
-        ui.horizontal(|ui| {
-            let mut documents_folder = app
-                .config
-                .rag
-                .documents_folder
-                .as_ref()
-                .map(|path| path.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if ui
-                .add(
-                    egui::TextEdit::singleline(&mut documents_folder)
-                        .hint_text(app.tr("settings.rag_documents_folder_hint")),
-                )
-                .changed()
-            {
-                let value = documents_folder.trim();
-                app.config.rag.documents_folder = if value.is_empty() {
-                    None
-                } else {
-                    Some(PathBuf::from(value))
-                };
-                app.persist_settings();
-            }
-
-            if ui.button(app.tr("settings.rag_browse")).clicked() {
-                let mut dialog = rfd::FileDialog::new();
-                if let Some(current) = &app.config.rag.documents_folder {
-                    dialog = dialog.set_directory(current);
-                }
-                if let Some(path) = dialog.pick_folder() {
-                    app.config.rag.documents_folder = Some(path);
-                    app.persist_settings();
-                }
-            }
-        });
-
-        ui.add_space(8.0);
-        ui.label(muted_label(
-            &app.tr("settings.rag_vector_db_path"),
-            app.theme.weak_text_color,
-        ));
-        let mut vector_db_path = app.config.rag.vector_db_path.to_string_lossy().to_string();
+        let mut update_beta = app.config.update.beta;
         if ui
-            .add(egui::TextEdit::singleline(&mut vector_db_path))
+            .checkbox(&mut update_beta, app.tr("settings.update_beta_channel"))
             .changed()
         {
-            let value = vector_db_path.trim();
-            if !value.is_empty() {
-                app.config.rag.vector_db_path = PathBuf::from(value);
-                app.persist_settings();
-            }
+            app.config.update.beta = update_beta;
+            app.persist_settings();
+            app.start_release_check(ctx);
         }
-
-        ui.add_space(8.0);
-        egui::CollapsingHeader::new(
-            egui::RichText::new(app.tr("settings.rag_advanced"))
-                .color(app.theme.text_color)
-                .strong(),
-        )
-        .id_source("settings_rag_advanced")
-        .default_open(false)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(muted_label(
-                    &app.tr("settings.rag_chunk_size"),
-                    app.theme.weak_text_color,
-                ));
-                let mut chunk_size = app.config.rag.chunk_size as u64;
-                if ui
-                    .add(egui::DragValue::new(&mut chunk_size).clamp_range(128..=20_000))
-                    .changed()
-                {
-                    app.config.rag.chunk_size = chunk_size as usize;
-                    app.persist_settings();
-                }
-            });
-
-            ui.horizontal(|ui| {
-                ui.label(muted_label(
-                    &app.tr("settings.rag_top_n"),
-                    app.theme.weak_text_color,
-                ));
-                let mut top_n = app.config.rag.max_retrieved_docs as u64;
-                if ui
-                    .add(egui::DragValue::new(&mut top_n).clamp_range(1..=20))
-                    .changed()
-                {
-                    app.config.rag.max_retrieved_docs = top_n as usize;
-                    app.persist_settings();
-                }
-            });
-        });
-
-        ui.add_space(8.0);
-        let can_index = app.config.rag.documents_folder.is_some();
-        let index_button = ui.add_enabled(
-            can_index && !app.rag_index_in_progress,
-            egui::Button::new(app.tr("settings.rag_index_now")),
-        );
-        if index_button.clicked() {
-            app.start_rag_index(ctx);
-        }
-        if app.rag_index_in_progress {
-            ui.label(muted_label(
-                &app.tr("settings.rag_indexing"),
-                app.theme.weak_text_color,
-            ));
-        } else if !can_index {
-            ui.label(muted_label(
-                &app.tr("settings.rag_index_disabled_hint"),
-                app.theme.weak_text_color,
-            ));
-        }
-
         ui.label(muted_label(
-            &app.tr("settings.rag_runtime_hint"),
+            &app.tr("settings.update_beta_channel_hint"),
             app.theme.weak_text_color,
         ));
     });
 }
 
+fn render_history_debug_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
+    egui::CollapsingHeader::new(
+        egui::RichText::new(app.tr("settings.history_debug"))
+            .color(app.theme.text_color)
+            .strong(),
+    )
+    .id_source("settings_history_debug")
+    .default_open(false)
+    .show(ui, |ui| {
+        let mut history_enabled = app.config.history.enabled;
+        if ui
+            .checkbox(&mut history_enabled, app.tr("settings.history_enabled"))
+            .changed()
+        {
+            app.config.history.enabled = history_enabled;
+            if !history_enabled {
+                app.show_history = false;
+            }
+            app.reload_history();
+            app.persist_settings();
+        }
+        ui.label(muted_label(
+            &app.tr("settings.history_warning"),
+            app.theme.weak_text_color,
+        ));
+
+        ui.add_space(8.0);
+        let mut debug_logging = app.config.logging.enabled;
+        if ui
+            .checkbox(&mut debug_logging, app.tr("settings.debug_logging"))
+            .changed()
+        {
+            app.config.logging.enabled = debug_logging;
+            app.persist_settings();
+        }
+        ui.label(muted_label(
+            &app.tr("settings.debug_logging_warning"),
+            app.theme.weak_text_color,
+        ));
+    });
+}
+
+fn render_rag_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
+    rag_settings::render_rag_settings_section(app, ctx, ui);
+}
+
 fn render_provider_settings_sections(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    ui.label(section_label(
-        &app.tr("settings.models"),
-        app.theme.text_color,
-    ));
-
-    let health_checks = backends::health_checks(&app.config);
-    let settings_theme = app.theme.clone();
-
-    render_provider_config_section(
-        app,
-        ctx,
-        ui,
-        &settings_theme,
-        ProviderConfigSection {
-            id: "settings_provider_gemini",
-            provider: "gemini",
-            health_check: health_check_for(&health_checks, "gemini"),
-            primary_label: app.tr("settings.gemini_key"),
-            secondary_label: app.tr("settings.gemini_model"),
-        },
-        |config| {
-            config
-                .gemini
-                .as_ref()
-                .map(|value| (value.api_key.clone(), value.model.clone()))
-        },
-        |config, primary, secondary| {
-            if let Some(value) = config.gemini.as_mut() {
-                value.api_key = primary;
-                value.model = secondary;
-            }
-        },
-    );
-
-    render_provider_config_section(
-        app,
-        ctx,
-        ui,
-        &settings_theme,
-        ProviderConfigSection {
-            id: "settings_provider_chatgpt",
-            provider: "chatgpt",
-            health_check: health_check_for(&health_checks, "chatgpt"),
-            primary_label: app.tr("settings.chatgpt_key"),
-            secondary_label: app.tr("settings.chatgpt_model"),
-        },
-        |config| {
-            config
-                .chatgpt
-                .as_ref()
-                .map(|value| (value.api_key.clone(), value.model.clone()))
-        },
-        |config, primary, secondary| {
-            if let Some(value) = config.chatgpt.as_mut() {
-                value.api_key = primary;
-                value.model = secondary;
-            }
-        },
-    );
-
-    render_provider_config_section(
-        app,
-        ctx,
-        ui,
-        &settings_theme,
-        ProviderConfigSection {
-            id: "settings_provider_claude",
-            provider: "claude",
-            health_check: health_check_for(&health_checks, "claude"),
-            primary_label: app.tr("settings.claude_key"),
-            secondary_label: app.tr("settings.claude_model"),
-        },
-        |config| {
-            config
-                .claude
-                .as_ref()
-                .map(|value| (value.api_key.clone(), value.model.clone()))
-        },
-        |config, primary, secondary| {
-            if let Some(value) = config.claude.as_mut() {
-                value.api_key = primary;
-                value.model = secondary;
-            }
-        },
-    );
-
-    render_provider_config_section(
-        app,
-        ctx,
-        ui,
-        &settings_theme,
-        ProviderConfigSection {
-            id: "settings_provider_ollama",
-            provider: "ollama",
-            health_check: health_check_for(&health_checks, "ollama"),
-            primary_label: app.tr("settings.ollama_url"),
-            secondary_label: app.tr("settings.ollama_model"),
-        },
-        |config| {
-            config
-                .ollama
-                .as_ref()
-                .map(|value| (value.base_url.clone(), value.model.clone()))
-        },
-        |config, primary, secondary| {
-            if let Some(value) = config.ollama.as_mut() {
-                value.base_url = primary;
-                value.model = secondary;
-            }
-        },
-    );
-}
-
-fn health_check_for(health_checks: &[HealthCheck], backend_name: &str) -> HealthCheck {
-    health_checks
-        .iter()
-        .find(|check| check.backend == backend_name)
-        .cloned()
-        .unwrap_or(HealthCheck {
-            backend: backend_name.to_string(),
-            level: HealthLevel::Warning,
-            summary: "Unknown".to_string(),
-            detail: "No health information available.".to_string(),
-        })
-}
-
-struct ProviderConfigSection {
-    id: &'static str,
-    provider: &'static str,
-    health_check: HealthCheck,
-    primary_label: String,
-    secondary_label: String,
-}
-
-fn render_provider_config_section<FGet, FSet>(
-    app: &mut AiPopupApp,
-    ctx: &egui::Context,
-    ui: &mut egui::Ui,
-    theme: &ResolvedTheme,
-    section: ProviderConfigSection,
-    get_values: FGet,
-    set_values: FSet,
-) where
-    FGet: Fn(&Config) -> Option<(String, String)>,
-    FSet: Fn(&mut Config, String, String),
-{
-    let Some((mut primary_value, mut secondary_value)) = get_values(&app.config) else {
-        return;
-    };
-
-    if provider_settings_section(
-        app,
-        ctx,
-        ui,
-        theme,
-        section.id,
-        section.provider,
-        &section.health_check,
-        &section.primary_label,
-        &section.secondary_label,
-        &mut primary_value,
-        &mut secondary_value,
-    ) {
-        set_values(&mut app.config, primary_value, secondary_value);
-        app.persist_settings();
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn provider_settings_section(
-    app: &mut AiPopupApp,
-    ctx: &egui::Context,
-    ui: &mut egui::Ui,
-    theme: &ResolvedTheme,
-    id: &str,
-    provider: &str,
-    health_check: &HealthCheck,
-    primary_label: &str,
-    secondary_label: &str,
-    primary_value: &mut String,
-    secondary_value: &mut String,
-) -> bool {
-    let mut changed = false;
-    let mut should_fetch_models = false;
-    let available_models_label = app.tr("settings.available_models");
-    let refresh_models_label = app.tr("settings.refresh_models");
-    let loading_models_label = app.tr("settings.loading_models");
-    let select_model_label = app.tr("settings.select_model");
-    let models_hint_label = app.tr("settings.models_hint");
-    let color = match health_check.level {
-        HealthLevel::Ok => theme.accent_color,
-        HealthLevel::Warning => egui::Color32::from_rgb(227, 177, 76),
-        HealthLevel::Error => theme.danger_color,
-    };
-    let header = egui::RichText::new(format!(
-        "{} · {}",
-        provider.to_uppercase(),
-        health_check.summary
-    ))
-    .color(color);
-
-    egui::CollapsingHeader::new(header)
-        .id_source(id)
-        .default_open(false)
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(&health_check.detail)
-                    .small()
-                    .color(theme.weak_text_color),
-            );
-            ui.add_space(8.0);
-            ui.label(muted_label(
-                &app.tr("settings.model_credits"),
-                theme.weak_text_color,
-            ));
-            ui.label(
-                egui::RichText::new(provider_credit_label(app, provider))
-                    .color(color)
-                    .strong(),
-            );
-            ui.label(muted_label(
-                &provider_credit_note(app, provider),
-                theme.weak_text_color,
-            ));
-
-            let primary_changed =
-                settings_text_field(ui, theme, primary_label, primary_value, true);
-            if primary_changed {
-                app.invalidate_provider_models(provider);
-            }
-            changed |= primary_changed;
-
-            if provider == "ollama" {
-                ui.label(muted_label(
-                    &app.tr("settings.ollama_url_hint"),
-                    theme.weak_text_color,
-                ));
-            }
-
-            let model_state = app
-                .provider_model_states
-                .entry(provider.to_string())
-                .or_default();
-            let (model_changed, model_interacted) = settings_model_field(
-                ui,
-                theme,
-                provider,
-                secondary_label,
-                secondary_value,
-                model_state,
-                &available_models_label,
-                &refresh_models_label,
-                &loading_models_label,
-                &select_model_label,
-                &models_hint_label,
-            );
-            changed |= model_changed;
-            should_fetch_models = model_interacted && model_state.models.is_empty();
-        });
-    if should_fetch_models {
-        app.request_provider_models(ctx, provider);
-    }
-    changed
+    provider_settings::render_provider_settings_sections(app, ctx, ui);
 }
 
 fn settings_text_field(
@@ -3909,452 +2581,6 @@ fn settings_text_field(
     ui.add(edit).changed()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn settings_model_field(
-    ui: &mut egui::Ui,
-    theme: &ResolvedTheme,
-    provider: &str,
-    label: &str,
-    value: &mut String,
-    state: &mut ProviderModelState,
-    available_models_label: &str,
-    refresh_label: &str,
-    loading_label: &str,
-    select_model_label: &str,
-    models_hint_label: &str,
-) -> (bool, bool) {
-    let mut changed = false;
-    let mut should_fetch = false;
-
-    ui.add_space(8.0);
-    ui.label(muted_label(label, theme.weak_text_color));
-    let response = ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
-    changed |= response.changed();
-    should_fetch |= response.clicked() || response.gained_focus() || response.has_focus();
-
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label(muted_label(available_models_label, theme.weak_text_color));
-        let button_label = if state.is_loading {
-            loading_label
-        } else {
-            refresh_label
-        };
-        if ui
-            .add_enabled(
-                !state.is_loading,
-                secondary_action_button(button_label, theme.panel_fill_soft),
-            )
-            .clicked()
-        {
-            state.models.clear();
-            state.last_error = None;
-            should_fetch = true;
-        }
-    });
-
-    if state.is_loading {
-        ui.label(muted_label(loading_label, theme.weak_text_color));
-    } else if !state.models.is_empty() {
-        let selected_text = if value.trim().is_empty() {
-            select_model_label.to_string()
-        } else {
-            value.clone()
-        };
-        dropdown_box_scope(ui, theme, |ui| {
-            egui::ComboBox::from_id_source(format!("{provider}_available_models"))
-                .selected_text(dropdown_button_text(&selected_text, theme))
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, theme);
-                    for model in &state.models {
-                        if ui.selectable_value(value, model.clone(), model).changed() {
-                            changed = true;
-                        }
-                    }
-                });
-        });
-    } else {
-        ui.label(muted_label(models_hint_label, theme.weak_text_color));
-    }
-
-    if let Some(error) = &state.last_error {
-        ui.label(egui::RichText::new(error).small().color(theme.danger_color));
-        ui.label(muted_label(models_hint_label, theme.weak_text_color));
-    }
-
-    (changed, should_fetch)
-}
-
-fn provider_credit_label(app: &AiPopupApp, provider: &str) -> String {
-    match provider {
-        "ollama" => app.tr("settings.credits_infinite"),
-        _ => app.tr("settings.credits_unknown"),
-    }
-}
-
-fn provider_credit_note(app: &AiPopupApp, provider: &str) -> String {
-    match provider {
-        "ollama" => app.tr("settings.model_credits_local"),
-        _ => app.tr("settings.model_credits_unavailable"),
-    }
-}
-
-fn load_image_attachment_from_path(path: &Path) -> Result<ImageAttachment, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|err| format!("Could not read image file `{}`: {err}", path.display()))?;
-    let mime_type = infer_image_mime(path)
-        .ok_or_else(|| "Unsupported image format. Use PNG, JPG, JPEG, WEBP, or GIF.".to_string())?;
-
-    Ok(image_attachment_from_bytes(
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("image")
-            .to_string(),
-        mime_type.to_string(),
-        bytes,
-    ))
-}
-
-fn load_image_attachment_from_clipboard() -> Result<ImageAttachment, String> {
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|err| format!("Clipboard not available: {err}"))?;
-    if let Ok(image) = clipboard.get_image() {
-        let mut png_bytes = Vec::new();
-        PngEncoder::new(&mut png_bytes)
-            .write_image(
-                image.bytes.as_ref(),
-                image.width as u32,
-                image.height as u32,
-                image::ExtendedColorType::Rgba8,
-            )
-            .map_err(|err| format!("Could not encode clipboard image: {err}"))?;
-
-        return Ok(image_attachment_from_bytes(
-            "clipboard-screenshot.png".to_string(),
-            "image/png".to_string(),
-            png_bytes,
-        ));
-    }
-
-    if let Ok(text) = clipboard.get_text() {
-        if let Some(path) = extract_image_path_from_clipboard_text(&text) {
-            return load_image_attachment_from_path(&path);
-        }
-    }
-
-    if let Some(attachment) = load_image_attachment_from_system_clipboard_commands() {
-        return Ok(attachment);
-    }
-
-    Err("Clipboard does not currently contain an image.".to_string())
-}
-
-fn image_attachment_from_bytes(name: String, mime_type: String, bytes: Vec<u8>) -> ImageAttachment {
-    ImageAttachment {
-        name,
-        mime_type,
-        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes.as_slice()),
-        size_bytes: bytes.len(),
-    }
-}
-
-fn extract_image_path_from_clipboard_text(text: &str) -> Option<PathBuf> {
-    for line in text.lines() {
-        let candidate = line.trim().trim_matches('\0');
-        if candidate.is_empty() {
-            continue;
-        }
-
-        let normalized = candidate
-            .strip_prefix("file://")
-            .unwrap_or(candidate)
-            .replace("%20", " ");
-        let path = PathBuf::from(normalized);
-        if path.exists() && infer_image_mime(&path).is_some() {
-            return Some(path);
-        }
-    }
-    None
-}
-
-#[derive(Debug, Default)]
-struct PromptPasteAction {
-    saw_text_paste_event: bool,
-    image_path_from_paste: Option<PathBuf>,
-}
-
-fn classify_prompt_paste_events(events: &[egui::Event]) -> PromptPasteAction {
-    let mut action = PromptPasteAction::default();
-
-    for event in events {
-        let egui::Event::Paste(text) = event else {
-            continue;
-        };
-
-        action.saw_text_paste_event = true;
-        if action.image_path_from_paste.is_none() {
-            action.image_path_from_paste = extract_image_path_from_clipboard_text(text);
-        }
-    }
-
-    action
-}
-
-fn should_attach_clipboard_image_from_shortcut(
-    paste_shortcut_pressed: bool,
-    prompt_before_edit: &str,
-    prompt_after_edit: &str,
-) -> bool {
-    paste_shortcut_pressed && prompt_before_edit == prompt_after_edit
-}
-
-fn load_image_attachment_from_system_clipboard_commands() -> Option<ImageAttachment> {
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        for (mime, extension) in [
-            ("image/png", "png"),
-            ("image/jpeg", "jpg"),
-            ("image/webp", "webp"),
-            ("image/gif", "gif"),
-        ] {
-            if let Some(bytes) = try_read_wayland_clipboard_image(mime)
-                .or_else(|| try_read_x11_clipboard_image(mime))
-            {
-                return Some(image_attachment_from_bytes(
-                    format!("clipboard-image.{extension}"),
-                    mime.to_string(),
-                    bytes,
-                ));
-            }
-        }
-    }
-
-    None
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn try_read_wayland_clipboard_image(mime_type: &str) -> Option<Vec<u8>> {
-    let output = Command::new("wl-paste")
-        .args(["--no-newline", "--type", mime_type])
-        .output()
-        .ok()?;
-    if !output.status.success() || output.stdout.is_empty() {
-        return None;
-    }
-    Some(output.stdout)
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn try_read_x11_clipboard_image(mime_type: &str) -> Option<Vec<u8>> {
-    let output = Command::new("xclip")
-        .args(["-selection", "clipboard", "-t", mime_type, "-o"])
-        .output()
-        .ok()?;
-    if !output.status.success() || output.stdout.is_empty() {
-        return None;
-    }
-    Some(output.stdout)
-}
-
-fn infer_image_mime(path: &Path) -> Option<&'static str> {
-    match path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_lowercase())
-        .as_deref()
-    {
-        Some("png") => Some("image/png"),
-        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
-        Some("webp") => Some("image/webp"),
-        Some("gif") => Some("image/gif"),
-        _ => None,
-    }
-}
-
-fn format_size(bytes: usize) -> String {
-    const KB: f32 = 1024.0;
-    const MB: f32 = 1024.0 * 1024.0;
-    if bytes as f32 >= MB {
-        format!("{:.1} MB", bytes as f32 / MB)
-    } else if bytes as f32 >= KB {
-        format!("{:.0} KB", bytes as f32 / KB)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-fn copy_text_to_clipboard(text: &str) {
-    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-        let _ = clipboard.set_text(text.to_string());
-    }
-}
-
-fn begin_voice_recording() -> Result<VoiceRecording, String> {
-    let path = std::env::temp_dir().join(format!(
-        "armando-dictation-{}-{}.wav",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0)
-    ));
-
-    let mut command = if command_exists("ffmpeg") {
-        let mut command = Command::new("ffmpeg");
-        command.args([
-            "-y",
-            "-f",
-            "pulse",
-            "-i",
-            "default",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-acodec",
-            "pcm_s16le",
-        ]);
-        command.arg(&path);
-        command
-    } else if command_exists("arecord") {
-        let mut command = Command::new("arecord");
-        command.args(["-q", "-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "wav"]);
-        command.arg(&path);
-        command
-    } else {
-        return Err(
-            "Voice dictation requires `ffmpeg` or `arecord` to be installed on the system."
-                .to_string(),
-        );
-    };
-
-    let child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|err| format!("Could not start microphone recording: {err}"))?;
-
-    Ok(VoiceRecording { child, path })
-}
-
-fn finish_voice_recording(mut recording: VoiceRecording) -> Result<Vec<u8>, String> {
-    let pid = recording.child.id().to_string();
-    let _ = Command::new("kill")
-        .args(["-INT", &pid])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let _ = recording.child.wait();
-
-    let bytes = std::fs::read(&recording.path)
-        .map_err(|err| format!("Could not read recorded dictation audio: {err}"))?;
-    let _ = std::fs::remove_file(&recording.path);
-    if bytes.is_empty() {
-        return Err(String::new());
-    }
-    Ok(bytes)
-}
-
-fn command_exists(name: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {name} >/dev/null 2>&1"))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn history_entry_card(
-    copy_label: &str,
-    reuse_label: &str,
-    select_label: &str,
-    prompt_label: &str,
-    response_label: &str,
-    selectable: bool,
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    theme: &ResolvedTheme,
-    entry: &HistoryEntry,
-    selected_history_entries: &mut HashSet<String>,
-    prompt: &mut String,
-    response: &mut String,
-    show_history: &mut bool,
-    prompt_focus_initialized: &mut bool,
-    history_action_error: &mut Option<String>,
-) {
-    let entry_id = history::entry_id(entry);
-    card_frame(ctx, theme.panel_fill_raised, theme.border_color).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if selectable {
-                let mut is_selected = selected_history_entries.contains(&entry_id);
-                if ui
-                    .checkbox(&mut is_selected, "")
-                    .on_hover_text(select_label)
-                    .changed()
-                {
-                    if is_selected {
-                        selected_history_entries.insert(entry_id.clone());
-                    } else {
-                        selected_history_entries.remove(&entry_id);
-                    }
-                }
-            }
-            ui.label(
-                egui::RichText::new(entry.backend.to_uppercase())
-                    .strong()
-                    .monospace()
-                    .color(ctx.style().visuals.hyperlink_color),
-            );
-            ui.label(
-                egui::RichText::new(trim_timestamp(&entry.created_at))
-                    .small()
-                    .color(theme.weak_text_color),
-            );
-        });
-
-        ui.add_space(6.0);
-        ui.label(muted_label(prompt_label, theme.weak_text_color));
-        ui.label(
-            egui::RichText::new(trim_for_preview(&entry.prompt, 180))
-                .strong()
-                .small(),
-        );
-        ui.add_space(6.0);
-        ui.label(muted_label(response_label, theme.weak_text_color));
-        ui.label(
-            egui::RichText::new(trim_for_preview(&entry.response, 260))
-                .small()
-                .color(theme.weak_text_color),
-        );
-        ui.add_space(8.0);
-
-        ui.horizontal_wrapped(|ui| {
-            let copy_button = secondary_action_button(copy_label, theme.panel_fill_soft);
-            if ui.add(copy_button).clicked() {
-                copy_text_to_clipboard(&entry.response);
-                *history_action_error = None;
-            }
-
-            let reuse_button =
-                primary_action_button(reuse_label, theme.accent_color, theme.accent_text_color);
-            if ui.add(reuse_button).clicked() {
-                *prompt = entry.prompt.clone();
-                *response = entry.response.clone();
-                *show_history = false;
-                ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
-                    620.0, 420.0,
-                )));
-                *prompt_focus_initialized = false;
-                *history_action_error = None;
-                ctx.request_repaint();
-            }
-        });
-    });
-}
-
 fn push_session_history_entry(
     session_history_entries: &mut Vec<HistoryEntry>,
     entry: HistoryEntry,
@@ -4363,116 +2589,14 @@ fn push_session_history_entry(
     session_history_entries.truncate(SESSION_HISTORY_LIMIT);
 }
 
-fn sync_main_viewport(
-    ctx: &egui::Context,
-    show_history: bool,
-    show_settings: bool,
-    window_height: f32,
-) {
-    let desired_size = main_viewport_min_size(show_history, show_settings, window_height);
-    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(desired_size));
-
-    if let Some(next_size) = requested_viewport_inner_size(
-        ctx.input(|i| i.viewport().inner_rect.map(|rect| rect.size())),
-        desired_size,
-    ) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(next_size));
-    }
-}
-
-fn trim_for_preview(text: &str, max_chars: usize) -> String {
-    let trimmed = text.trim();
-    let mut result = String::new();
-    for (index, ch) in trimmed.chars().enumerate() {
-        if index >= max_chars {
-            result.push_str("...");
-            return result;
-        }
-        result.push(ch);
-    }
-    result
-}
-
-fn default_prompt_editor_height(window_height: f32) -> f32 {
-    (window_height * 0.16).clamp(88.0, 136.0)
-}
-
-fn default_response_editor_height(window_height: f32) -> f32 {
-    (window_height * 0.18).clamp(96.0, 156.0)
-}
-
-fn main_viewport_min_size(
-    show_history: bool,
-    show_settings: bool,
-    window_height: f32,
-) -> egui::Vec2 {
-    const BASE_MIN_WIDTH: f32 = 820.0;
-    const BASE_MIN_HEIGHT: f32 = 500.0;
-    const SETTINGS_MIN_WIDTH: f32 = 1320.0;
-    const SETTINGS_MIN_HEIGHT: f32 = 600.0;
-    const HISTORY_MIN_HEIGHT: f32 = 620.0;
-    const MAX_DEFAULT_HEIGHT: f32 = 680.0;
-
-    let preferred_height = window_height.clamp(BASE_MIN_HEIGHT, MAX_DEFAULT_HEIGHT);
-
-    let min_width = if show_settings {
-        SETTINGS_MIN_WIDTH
-    } else {
-        BASE_MIN_WIDTH
-    };
-    let min_height = if show_settings {
-        preferred_height
-            .max(SETTINGS_MIN_HEIGHT)
-            .max(if show_history {
-                HISTORY_MIN_HEIGHT
-            } else {
-                BASE_MIN_HEIGHT
-            })
-    } else if show_history {
-        preferred_height.max(HISTORY_MIN_HEIGHT)
-    } else {
-        preferred_height
-    };
-
-    egui::vec2(min_width, min_height)
-}
-
 fn editor_max_height(ctx: &egui::Context, min_height: f32) -> f32 {
     let viewport_height = ctx
         .input(|i| i.viewport().inner_rect.map(|rect| rect.height()))
         .unwrap_or(600.0);
-    editor_max_height_for_viewport(viewport_height, min_height)
+    layout::editor_max_height_for_viewport(viewport_height, min_height)
 }
 
-fn editor_max_height_for_viewport(viewport_height: f32, min_height: f32) -> f32 {
-    (viewport_height / 3.0).max(min_height)
-}
-
-fn requested_viewport_inner_size(
-    current_size: Option<egui::Vec2>,
-    desired_size: egui::Vec2,
-) -> Option<egui::Vec2> {
-    current_size.and_then(|current_size| {
-        if current_size.x < desired_size.x || current_size.y < desired_size.y {
-            Some(egui::vec2(
-                current_size.x.max(desired_size.x),
-                current_size.y.max(desired_size.y),
-            ))
-        } else {
-            None
-        }
-    })
-}
-
-fn section_actions_right_inset() -> f32 {
-    10.0
-}
-
-fn trim_timestamp(value: &str) -> String {
-    value.replace('T', " ").replace('Z', "")
-}
-
-fn open_path_in_file_manager(path: &Path) -> anyhow::Result<()> {
+pub(super) fn open_path_in_file_manager(path: &Path) -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
@@ -4497,17 +2621,6 @@ fn open_path_in_file_manager(path: &Path) -> anyhow::Result<()> {
     Err(anyhow::anyhow!(
         "Opening files or folders in the system file manager is not supported on this platform"
     ))
-}
-
-fn open_history_file() -> anyhow::Result<()> {
-    let path = history::history_file_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if !path.exists() {
-        std::fs::File::create(&path)?;
-    }
-    open_path_in_file_manager(&path)
 }
 
 fn get_primary_selection() -> Result<String, String> {
@@ -4659,8 +2772,9 @@ mod tests {
 
     #[test]
     fn classify_prompt_paste_events_detects_plain_text_paste() {
-        let action =
-            classify_prompt_paste_events(&[egui::Event::Paste("hello from clipboard".to_string())]);
+        let action = media_io::classify_prompt_paste_events(&[egui::Event::Paste(
+            "hello from clipboard".to_string(),
+        )]);
 
         assert!(action.saw_text_paste_event);
         assert!(action.image_path_from_paste.is_none());
@@ -4673,7 +2787,7 @@ mod tests {
         let image_path = temp_dir.join("clipboard-image.png");
         std::fs::write(&image_path, b"png").unwrap();
 
-        let action = classify_prompt_paste_events(&[egui::Event::Paste(
+        let action = media_io::classify_prompt_paste_events(&[egui::Event::Paste(
             image_path.to_string_lossy().into_owned(),
         )]);
 
@@ -4686,7 +2800,7 @@ mod tests {
 
     #[test]
     fn should_attach_clipboard_image_when_shortcut_does_not_change_prompt() {
-        assert!(should_attach_clipboard_image_from_shortcut(
+        assert!(media_io::should_attach_clipboard_image_from_shortcut(
             true,
             "existing prompt",
             "existing prompt",
@@ -4695,7 +2809,7 @@ mod tests {
 
     #[test]
     fn should_not_attach_clipboard_image_when_prompt_changed() {
-        assert!(!should_attach_clipboard_image_from_shortcut(
+        assert!(!media_io::should_attach_clipboard_image_from_shortcut(
             true,
             "before",
             "before pasted text",
@@ -4728,40 +2842,40 @@ mod tests {
 
     #[test]
     fn editor_max_height_stays_within_a_third_of_the_viewport() {
-        assert_eq!(editor_max_height_for_viewport(900.0, 96.0), 300.0);
-        assert_eq!(editor_max_height_for_viewport(1200.0, 84.0), 400.0);
+        assert_eq!(layout::editor_max_height_for_viewport(900.0, 96.0), 300.0);
+        assert_eq!(layout::editor_max_height_for_viewport(1200.0, 84.0), 400.0);
     }
 
     #[test]
     fn editor_max_height_respects_minimum_when_viewport_is_small() {
-        assert_eq!(editor_max_height_for_viewport(240.0, 96.0), 96.0);
-        assert_eq!(editor_max_height_for_viewport(180.0, 84.0), 84.0);
+        assert_eq!(layout::editor_max_height_for_viewport(240.0, 96.0), 96.0);
+        assert_eq!(layout::editor_max_height_for_viewport(180.0, 84.0), 84.0);
     }
 
     #[test]
     fn default_editor_heights_use_compact_startup_sizes() {
-        assert!((default_prompt_editor_height(600.0) - 96.0).abs() < f32::EPSILON);
-        assert!((default_response_editor_height(600.0) - 108.0).abs() < 0.001);
-        assert!((default_prompt_editor_height(1200.0) - 136.0).abs() < f32::EPSILON);
-        assert!((default_response_editor_height(1200.0) - 156.0).abs() < f32::EPSILON);
+        assert!((layout::default_prompt_editor_height(600.0) - 96.0).abs() < f32::EPSILON);
+        assert!((layout::default_response_editor_height(600.0) - 108.0).abs() < 0.001);
+        assert!((layout::default_prompt_editor_height(1200.0) - 136.0).abs() < f32::EPSILON);
+        assert!((layout::default_response_editor_height(1200.0) - 156.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn main_viewport_min_size_respects_base_history_and_settings_modes() {
         assert_eq!(
-            main_viewport_min_size(false, false, 540.0),
+            layout::main_viewport_min_size(false, false, 540.0),
             egui::vec2(820.0, 540.0)
         );
         assert_eq!(
-            main_viewport_min_size(true, false, 540.0),
+            layout::main_viewport_min_size(true, false, 540.0),
             egui::vec2(820.0, 620.0)
         );
         assert_eq!(
-            main_viewport_min_size(false, true, 540.0),
+            layout::main_viewport_min_size(false, true, 540.0),
             egui::vec2(1320.0, 600.0)
         );
         assert_eq!(
-            main_viewport_min_size(true, true, 540.0),
+            layout::main_viewport_min_size(true, true, 540.0),
             egui::vec2(1320.0, 620.0)
         );
     }
@@ -4769,15 +2883,15 @@ mod tests {
     #[test]
     fn main_viewport_min_size_clamps_extreme_heights() {
         assert_eq!(
-            main_viewport_min_size(false, false, 320.0),
+            layout::main_viewport_min_size(false, false, 320.0),
             egui::vec2(820.0, 500.0)
         );
         assert_eq!(
-            main_viewport_min_size(false, false, 900.0),
+            layout::main_viewport_min_size(false, false, 900.0),
             egui::vec2(820.0, 680.0)
         );
         assert_eq!(
-            main_viewport_min_size(true, true, 900.0),
+            layout::main_viewport_min_size(true, true, 900.0),
             egui::vec2(1320.0, 680.0)
         );
     }
@@ -4787,18 +2901,21 @@ mod tests {
         let desired_size = egui::vec2(820.0, 620.0);
 
         assert_eq!(
-            requested_viewport_inner_size(Some(egui::vec2(640.0, 700.0)), desired_size),
+            layout::requested_viewport_inner_size(Some(egui::vec2(640.0, 700.0)), desired_size),
             Some(egui::vec2(820.0, 700.0))
         );
         assert_eq!(
-            requested_viewport_inner_size(Some(egui::vec2(900.0, 540.0)), desired_size),
+            layout::requested_viewport_inner_size(Some(egui::vec2(900.0, 540.0)), desired_size),
             Some(egui::vec2(900.0, 620.0))
         );
         assert_eq!(
-            requested_viewport_inner_size(Some(egui::vec2(900.0, 700.0)), desired_size),
+            layout::requested_viewport_inner_size(Some(egui::vec2(900.0, 700.0)), desired_size),
             None
         );
-        assert_eq!(requested_viewport_inner_size(None, desired_size), None);
+        assert_eq!(
+            layout::requested_viewport_inner_size(None, desired_size),
+            None
+        );
     }
 
     #[derive(Debug)]
@@ -4826,14 +2943,17 @@ mod tests {
     }
 
     fn visual_layout_snapshot(state: &VisualLayoutState) -> String {
-        let min_inner_size =
-            main_viewport_min_size(state.show_history, state.show_settings, state.window_height);
-        let prompt_default = default_prompt_editor_height(state.window_height);
-        let response_default = default_response_editor_height(state.window_height);
-        let prompt_max = editor_max_height_for_viewport(state.window_height, 88.0);
-        let response_max = editor_max_height_for_viewport(state.window_height, 84.0);
+        let min_inner_size = layout::main_viewport_min_size(
+            state.show_history,
+            state.show_settings,
+            state.window_height,
+        );
+        let prompt_default = layout::default_prompt_editor_height(state.window_height);
+        let response_default = layout::default_response_editor_height(state.window_height);
+        let prompt_max = layout::editor_max_height_for_viewport(state.window_height, 88.0);
+        let response_max = layout::editor_max_height_for_viewport(state.window_height, 84.0);
         let requested_inner_size =
-            requested_viewport_inner_size(state.current_inner_size, min_inner_size);
+            layout::requested_viewport_inner_size(state.current_inner_size, min_inner_size);
 
         format!(
             "{name}\n  min_inner={min_inner}\n  requested_inner={requested_inner}\n  prompt_default={prompt_default:.1}\n  response_default={response_default:.1}\n  prompt_max={prompt_max:.1}\n  response_max={response_max:.1}\n  startup_health=false\n  first_run_setup=false\n  status_section={status}\n  session_history={session_history}\n  saved_history={saved_history}\n  toolbar_right_inset=10.0\n",

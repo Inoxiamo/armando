@@ -1,5 +1,5 @@
 use armando::app_paths;
-use armando::config::Config;
+use armando::config::{Config, RagMode, RagRuntimeOverride};
 
 mod support;
 
@@ -228,4 +228,43 @@ fn bundled_profile_templates_are_discovered_and_loadable() {
     assert_eq!(beta.ui.language, "en");
     assert!(beta.logging.enabled);
     assert!(!beta.history.enabled);
+}
+
+#[test]
+fn config_save_roundtrips_rag_mode_and_runtime_override() {
+    let _guard = support::test_lock();
+    let temp_dir = support::unique_temp_dir("config-rag-roundtrip");
+    let config_path = temp_dir.join("config.yaml");
+    std::fs::write(
+        &config_path,
+        "\
+default_backend: ollama
+rag:
+  enabled: true
+  mode: keyword
+  runtime_override: force_off
+",
+    )
+    .unwrap();
+
+    let previous = std::env::var_os("ARMANDO_CONFIG");
+    std::env::set_var("ARMANDO_CONFIG", &config_path);
+
+    let mut config = Config::load().unwrap();
+    assert_eq!(config.rag.mode, RagMode::Keyword);
+    assert_eq!(config.rag.runtime_override, RagRuntimeOverride::ForceOff);
+
+    config.rag.mode = RagMode::Hybrid;
+    config.rag.runtime_override = RagRuntimeOverride::ForceOn;
+    config.save().unwrap();
+
+    let reloaded = Config::load().unwrap();
+    assert_eq!(reloaded.rag.mode, RagMode::Hybrid);
+    assert_eq!(reloaded.rag.runtime_override, RagRuntimeOverride::ForceOn);
+
+    match previous {
+        Some(value) => std::env::set_var("ARMANDO_CONFIG", value),
+        None => std::env::remove_var("ARMANDO_CONFIG"),
+    }
+    support::remove_dir_all_if_exists(&temp_dir);
 }

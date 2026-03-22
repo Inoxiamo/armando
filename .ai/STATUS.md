@@ -20,11 +20,14 @@
 - Settings footer also exposes a Linux/macOS bootstrap shortcut so guided updates can skip the manual archive step
 - Startup diagnostics are available from a collapsed section in settings, keeping the main popup minimal while still exposing config source, selected backend readiness, and optional tool availability
 - Startup health rows now include short recovery hints so missing config, backend selection, dictation tools, and clipboard helpers point to the next action
+- Startup/backend health logic is extracted into dedicated backend helpers, with the UI rendering kept in focused startup-health helpers
+- Backend query orchestration is now split through `src/backends/query_flow.rs`, keeping `backends::query` as stable public entrypoint
 - First-run startup now falls back to bundled defaults when no config file exists and shows a compact setup card with create/open actions for the writable config directory
 - First-run setup can now seed the writable config from a bundled template/profile and keeps the template choice visible in the onboarding card
 - Active `NERV HUD` theme with revised palette
 - Compatibility preserved for legacy theme names `nerv-magi-system` and `magi`
 - Unified dropdown styling across the main popup, settings panel, and history filter
+- Settings sections follow a clearer collapsible order, with provider groups closed by default and RAG/startup sections collapsed until needed
 - Settings gear aligned to the right side of the top toolbar
 - Project icon integrated both in the native viewport and in the local desktop installation assets
 - Prompt preparation optimized for cleanup, rewriting, translation, and text adaptation
@@ -39,8 +42,11 @@
 - Provider settings can load the currently available models from the backend API or local Ollama server and let the user pick them from a dropdown
 - Provider settings show a residual-credit indicator, with `∞` for Ollama and `n/d` for cloud providers that do not expose reliable balance data here
 - RAG system with recursive document indexing and retrieval modes: `keyword` (SQLite FTS5/BM25), `vector` (cosine over embeddings), and `hybrid` (merged lexical + vector scores)
+- RAG internals are now split into focused modules (`src/rag/scoring.rs`, `src/rag/text.rs`) while preserving the same runtime behavior
 - RAG settings now include mode selection plus optional embedding backend/model overrides for vector/hybrid retrieval
+- RAG settings are now canonical in `config.rag` (including `runtime_override`), removing duplicate UI-only persistence paths
 - RAG settings panel section is collapsible and includes in-app indexing controls
+- Embedding dispatch is split into `src/backends/embedding.rs` with pass-through API in `src/backends/mod.rs`
 - Main prompt and response actions now live in compact toolbars near their respective editors instead of large text buttons below the prompt
 - Prompt and response editors can now be resized directly with the mouse by dragging their lower edge
 - Provider configuration sections are closed by default in settings, including the Ollama URL/model section
@@ -88,6 +94,9 @@
 - Response streaming is currently wired end-to-end for Ollama only; the UI can already consume progressive chunks while the cloud backends still complete in single-shot mode
 - Prompt and response editors now reserve an explicit rendered height instead of relying only on desired row count, so drag-resize limits are actually enforced
 - Prompt and response editor growth is capped to about one third of the current viewport height, while still allowing manual shrink with the mouse
+- GUI panel logic is now split into `src/gui/settings_panel.rs`, `src/gui/history_panel.rs`, `src/gui/provider_settings.rs`, and `src/gui/rag_settings.rs`
+- Startup diagnostics and first-run setup rendering are now extracted into `src/gui/startup_health.rs`
+- History entry rendering/actions are extracted into `src/gui/history_entry.rs`
 - Pasting into the prompt with `Ctrl+V` or `Cmd+V` now also auto-attaches an image when the clipboard contains one, while normal text paste continues to work as usual
 - Clipboard image paste now also falls back to local image paths or `file://` image URIs copied from other apps when direct bitmap clipboard data is unavailable
 - History reloads when enabled, when the panel is opened, and after every successful response
@@ -111,11 +120,13 @@
 - Explicit language overrides in either mode accept short aliases such as `EN`, `IT`, `ES`, `FR`, `DE`, `JA` and broader names such as `ENGLISH`, `ITALIAN`, `SPANISH`, `FRENCH`, `GERMAN`, `JAPANESE`, plus additional common language aliases
 - In `Generic question` mode, text-assist aliases and rewrite-oriented prompt expansions are bypassed, even if in-memory chat session mode is enabled
 - RAG retrieval mode comes from config/UI and can be overridden per-prompt with `!rag on` and `!rag off`
+- RAG UI mode and runtime override now map directly to `rag.mode` and `rag.runtime_override`, preventing drift between UI state and runtime behavior
 - In `keyword` mode, indexing/retrieval does not call embedding APIs
 - In `vector` and `hybrid` modes, embedding generation can use `rag.embedding_backend` and `rag.embedding_model`, independent from the active query backend
 
 ## Known Gaps
 
+- RAG indexing now uses an atomic SQLite transaction for clear+insert within the selected retrieval scope; full transactional swap/staging for very large datasets can still be improved.
 - Streaming is not universal yet; Ollama streams progressively, while ChatGPT, Claude, and Gemini still complete in single-shot mode
 - No automated UI tests for layout, scrolling, and popup interactions
 - No pixel-level validation yet for `egui` layout behavior across DPI scales, desktop environments, and maximized windows
@@ -133,6 +144,7 @@
 
 ## Immediate Priorities
 
+- Parallel cleanup tracks active: GUI layout extraction and backend prompt extraction.
 - Continue refining the compact toolbar language and the `NERV HUD` visual pass
 - Add higher-confidence UI regression coverage for editor sizing, viewport changes, and layout edge cases
 - Evaluate a beta tools mode for terminal/CLI/MCP behind explicit confirmation

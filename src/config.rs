@@ -37,12 +37,23 @@ pub enum RagMode {
     Hybrid,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RagRuntimeOverride {
+    #[default]
+    Default,
+    ForceOn,
+    ForceOff,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RagConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub mode: RagMode,
+    #[serde(default)]
+    pub runtime_override: RagRuntimeOverride,
     pub documents_folder: Option<PathBuf>,
     #[serde(default = "default_rag_vector_db_path")]
     pub vector_db_path: PathBuf,
@@ -194,6 +205,7 @@ impl Default for RagConfig {
         Self {
             enabled: false,
             mode: RagMode::Vector,
+            runtime_override: RagRuntimeOverride::Default,
             documents_folder: None,
             vector_db_path: default_rag_vector_db_path(),
             max_retrieved_docs: default_rag_max_retrieved_docs(),
@@ -358,6 +370,7 @@ mod tests {
         assert!(!config.update.beta);
         assert!(!config.rag.enabled);
         assert_eq!(config.rag.mode, RagMode::Vector);
+        assert_eq!(config.rag.runtime_override, RagRuntimeOverride::Default);
         assert!(config.rag.documents_folder.is_none());
         assert_eq!(
             config.rag.vector_db_path,
@@ -374,12 +387,14 @@ mod tests {
         let yaml = r#"
 rag:
   mode: hybrid
+  runtime_override: force_on
   embedding_backend: chatgpt
   embedding_model: text-embedding-3-large
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
 
         assert_eq!(config.rag.mode, RagMode::Hybrid);
+        assert_eq!(config.rag.runtime_override, RagRuntimeOverride::ForceOn);
         assert_eq!(config.rag.embedding_backend.as_deref(), Some("chatgpt"));
         assert_eq!(
             config.rag.embedding_model.as_deref(),

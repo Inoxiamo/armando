@@ -1,4 +1,4 @@
-use armando::config::{Config, RagConfig, RagMode};
+use armando::config::{Config, RagConfig, RagMode, RagRuntimeOverride};
 use armando::rag::RagSystem;
 use rusqlite::{params, Connection};
 use std::fs;
@@ -83,6 +83,7 @@ fn rag_vector_retrieval_returns_most_similar_chunks_first() {
     let rag = RagSystem::new(RagConfig {
         enabled: true,
         mode: RagMode::Vector,
+        runtime_override: RagRuntimeOverride::Default,
         documents_folder: None,
         vector_db_path: db_path,
         max_retrieved_docs: 2,
@@ -114,6 +115,7 @@ fn rag_keyword_indexing_and_retrieval_skip_embeddings() {
     let rag = RagSystem::new(RagConfig {
         enabled: true,
         mode: RagMode::Keyword,
+        runtime_override: RagRuntimeOverride::Default,
         documents_folder: Some(docs_dir.clone()),
         vector_db_path: db_path.clone(),
         max_retrieved_docs: 2,
@@ -126,6 +128,7 @@ fn rag_keyword_indexing_and_retrieval_skip_embeddings() {
     config.rag = RagConfig {
         enabled: true,
         mode: RagMode::Keyword,
+        runtime_override: RagRuntimeOverride::Default,
         documents_folder: Some(docs_dir.clone()),
         vector_db_path: db_path,
         max_retrieved_docs: 2,
@@ -194,6 +197,7 @@ fn rag_hybrid_merge_combines_keyword_and_vector_scores() {
     let rag = RagSystem::new(RagConfig {
         enabled: true,
         mode: RagMode::Vector,
+        runtime_override: RagRuntimeOverride::Default,
         documents_folder: None,
         vector_db_path: db_path,
         max_retrieved_docs: 2,

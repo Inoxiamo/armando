@@ -117,7 +117,7 @@ strings:
   settings.history_warning: "Disabled by default. Enable only if you want prompts and responses saved locally in the history view. Session entries stay in memory either way."
   settings.debug_logging: "Enable debug logging"
   settings.debug_logging_warning: "Not recommended outside debugging because requests, context, and errors may be written to a local log file."
-  settings.health: "Health Check"
+  settings.health: "Health checks"
   settings.models: "Models and keys"
   settings.model_credits: "Remaining credits"
   settings.credits_infinite: "∞"

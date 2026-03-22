@@ -14,6 +14,12 @@ Work should be proposed and executed two items at a time.
 - [x] Clearer runtime status and recovery messaging for backend state, persistence, and failure handling
 - [x] Backend HTTP fault-injection coverage for queries, model lookup, and malformed/error responses
 
+### Phase 2 Follow-ups
+
+- [ ] Finish the remaining `src/backends/mod.rs` wiring after extracting `health.rs` and `models.rs`
+- [ ] Finish the GUI module wiring around `settings_panel`, `history_panel`, `provider_settings`, and `rag_settings`
+- [ ] Keep Phase 2 merges gated by `cargo fmt`, `cargo test`, and the current UI smoke checklist
+
 ## Milestone 0.1 - Working Core
 
 - [x] Minimal desktop UI in Rust/egui
