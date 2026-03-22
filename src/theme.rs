@@ -220,6 +220,9 @@ danger_color: \"#A1A2A3\"\n",
             claude: None,
             ollama: None,
             loaded_from: None,
+            chatgpt_api_key_from_env: false,
+            gemini_api_key_from_env: false,
+            claude_api_key_from_env: false,
         };
 
         let theme = load_theme(&config).unwrap();

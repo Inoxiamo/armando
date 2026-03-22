@@ -14,7 +14,7 @@ logging:
 update:
   beta: false
 rag:
-  enabled: true
+  enabled: false
   mode: vector
   runtime_override: force_on
   documents_folder: /home/simone/work/test-popup-ai/.test-doc-rag
@@ -24,7 +24,7 @@ rag:
   embedding_backend: ollama
   embedding_model: nomic-embed-text
 gemini:
-  api_key: AIzaSyCeV_jj7lG77hpnfT5q-YtLcNsh2dnQy6I
+  api_key: YOUR_GEMINI_API_KEY
   model: gemini-2.5-flash
 chatgpt:
   api_key: YOUR_OPENAI_API_KEY

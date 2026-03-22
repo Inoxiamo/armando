@@ -145,6 +145,12 @@ pub struct Config {
     pub ollama: Option<OllamaConfig>,
     #[serde(skip)]
     pub loaded_from: Option<PathBuf>,
+    #[serde(skip)]
+    pub(crate) chatgpt_api_key_from_env: bool,
+    #[serde(skip)]
+    pub(crate) gemini_api_key_from_env: bool,
+    #[serde(skip)]
+    pub(crate) claude_api_key_from_env: bool,
 }
 
 impl Default for Config {
@@ -164,6 +170,9 @@ impl Default for Config {
             claude: None,
             ollama: None,
             loaded_from: None,
+            chatgpt_api_key_from_env: false,
+            gemini_api_key_from_env: false,
+            claude_api_key_from_env: false,
         }
     }
 }
@@ -273,6 +282,7 @@ impl Config {
 
         let mut serializable = self.clone();
         serializable.loaded_from = None;
+        serializable.strip_env_sourced_api_keys();
         let content = serde_yaml::to_string(&serializable)?;
         std::fs::write(&path, content)?;
         self.loaded_from = Some(path);
@@ -289,6 +299,24 @@ impl Config {
         config.loaded_from = Some(path);
         Ok(Some(config))
     }
+
+    fn strip_env_sourced_api_keys(&mut self) {
+        if self.chatgpt_api_key_from_env {
+            if let Some(section) = self.chatgpt.as_mut() {
+                section.api_key = "YOUR_OPENAI_API_KEY".to_string();
+            }
+        }
+        if self.gemini_api_key_from_env {
+            if let Some(section) = self.gemini.as_mut() {
+                section.api_key = "YOUR_GEMINI_API_KEY".to_string();
+            }
+        }
+        if self.claude_api_key_from_env {
+            if let Some(section) = self.claude.as_mut() {
+                section.api_key = "YOUR_ANTHROPIC_API_KEY".to_string();
+            }
+        }
+    }
 }
 
 fn first_env(keys: &[&str]) -> Option<String> {
@@ -304,29 +332,73 @@ fn is_placeholder_env_value(value: &str) -> bool {
     normalized.starts_with("YOUR_")
 }
 
+fn should_apply_env_api_key(existing: Option<&str>) -> bool {
+    match existing {
+        None => true,
+        Some(value) => {
+            let normalized = value.trim();
+            normalized.is_empty() || is_placeholder_env_value(normalized)
+        }
+    }
+}
+
 fn apply_env_overrides(config: &mut Config) {
+    config.chatgpt_api_key_from_env = false;
+    config.gemini_api_key_from_env = false;
+    config.claude_api_key_from_env = false;
+
     if let Some(api_key) = first_env(&["ARMANDO_GEMINI_API_KEY", "GEMINI_API_KEY"]) {
+        let current = config
+            .gemini
+            .as_ref()
+            .map(|section| section.api_key.as_str());
+        let matches_env = current.is_some_and(|value| value.trim() == api_key);
         let section = config.gemini.get_or_insert(GeminiConfig {
             api_key: String::new(),
             model: "gemini-1.5-flash".to_string(),
         });
-        section.api_key = api_key;
+        if should_apply_env_api_key(Some(section.api_key.as_str())) {
+            section.api_key = api_key;
+            config.gemini_api_key_from_env = true;
+        } else if matches_env {
+            config.gemini_api_key_from_env = true;
+        }
     }
 
     if let Some(api_key) = first_env(&["ARMANDO_OPENAI_API_KEY", "OPENAI_API_KEY"]) {
+        let current = config
+            .chatgpt
+            .as_ref()
+            .map(|section| section.api_key.as_str());
+        let matches_env = current.is_some_and(|value| value.trim() == api_key);
         let section = config.chatgpt.get_or_insert(ChatGptConfig {
             api_key: String::new(),
             model: "gpt-4o-mini".to_string(),
         });
-        section.api_key = api_key;
+        if should_apply_env_api_key(Some(section.api_key.as_str())) {
+            section.api_key = api_key;
+            config.chatgpt_api_key_from_env = true;
+        } else if matches_env {
+            config.chatgpt_api_key_from_env = true;
+        }
     }
 
     if let Some(api_key) = first_env(&["ARMANDO_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"]) {
+        let current = config
+            .claude
+            .as_ref()
+            .map(|section| section.api_key.as_str());
+        let matches_env = current.is_some_and(|value| value.trim() == api_key);
         let section = config.claude.get_or_insert(ClaudeConfig {
             api_key: String::new(),
             model: "claude-3-5-sonnet-latest".to_string(),
         });
-        section.api_key = api_key;
+        if should_apply_env_api_key(Some(section.api_key.as_str())) {
+            section.api_key = api_key;
+            config.claude_api_key_from_env = true;
+        } else if matches_env {
+            config.claude_api_key_from_env = true;
+        }
     }
 
     if let Some(documents_folder) = first_env(&["ARMANDO_RAG_DOCUMENTS_FOLDER"]) {
@@ -478,6 +550,87 @@ rag:
             Some("keep-claude")
         );
 
+        std::env::remove_var("ARMANDO_OPENAI_API_KEY");
+        std::env::remove_var("ARMANDO_GEMINI_API_KEY");
+        std::env::remove_var("ARMANDO_ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn env_overrides_do_not_replace_explicit_api_keys() {
+        let _guard = env_lock();
+        std::env::set_var("ARMANDO_OPENAI_API_KEY", "from-env-openai");
+        std::env::set_var("ARMANDO_GEMINI_API_KEY", "from-env-gemini");
+        std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "from-env-claude");
+
+        let mut config = Config::default();
+        config.chatgpt = Some(ChatGptConfig {
+            api_key: "from-file-openai".to_string(),
+            model: "gpt-4o-mini".to_string(),
+        });
+        config.gemini = Some(GeminiConfig {
+            api_key: "from-file-gemini".to_string(),
+            model: "gemini-1.5-flash".to_string(),
+        });
+        config.claude = Some(ClaudeConfig {
+            api_key: "from-file-claude".to_string(),
+            model: "claude-3-5-sonnet-latest".to_string(),
+        });
+
+        apply_env_overrides(&mut config);
+
+        assert_eq!(
+            config.chatgpt.as_ref().map(|value| value.api_key.as_str()),
+            Some("from-file-openai")
+        );
+        assert_eq!(
+            config.gemini.as_ref().map(|value| value.api_key.as_str()),
+            Some("from-file-gemini")
+        );
+        assert_eq!(
+            config.claude.as_ref().map(|value| value.api_key.as_str()),
+            Some("from-file-claude")
+        );
+        assert!(!config.chatgpt_api_key_from_env);
+        assert!(!config.gemini_api_key_from_env);
+        assert!(!config.claude_api_key_from_env);
+
+        std::env::remove_var("ARMANDO_OPENAI_API_KEY");
+        std::env::remove_var("ARMANDO_GEMINI_API_KEY");
+        std::env::remove_var("ARMANDO_ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn save_redacts_env_sourced_api_keys() {
+        let _guard = env_lock();
+        std::env::set_var("ARMANDO_OPENAI_API_KEY", "from-env-openai");
+        std::env::set_var("ARMANDO_GEMINI_API_KEY", "from-env-gemini");
+        std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "from-env-claude");
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "armando-config-save-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("default.yaml");
+
+        let mut config = Config::default();
+        config.loaded_from = Some(path.clone());
+        apply_env_overrides(&mut config);
+        config.save().unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("from-env-openai"));
+        assert!(!written.contains("from-env-gemini"));
+        assert!(!written.contains("from-env-claude"));
+        assert!(written.contains("YOUR_OPENAI_API_KEY"));
+        assert!(written.contains("YOUR_GEMINI_API_KEY"));
+        assert!(written.contains("YOUR_ANTHROPIC_API_KEY"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
         std::env::remove_var("ARMANDO_OPENAI_API_KEY");
         std::env::remove_var("ARMANDO_GEMINI_API_KEY");
         std::env::remove_var("ARMANDO_ANTHROPIC_API_KEY");

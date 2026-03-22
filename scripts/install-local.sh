@@ -187,6 +187,11 @@ install_or_merge_default_config "${CONFIG_SOURCE}" "${CONFIG_DIR}/default.yaml"
 install_config_file "${PROMPT_TAGS_SOURCE}" "${CONFIG_ROOT}/prompt-tags.yaml"
 install_config_file "${GENERIC_PROMPTS_SOURCE}" "${CONFIG_ROOT}/generic-prompts.yaml"
 
+if git -C "${ROOT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  chmod +x "${ROOT_DIR}/.githooks/pre-commit" 2>/dev/null || true
+  git -C "${ROOT_DIR}" config core.hooksPath .githooks
+fi
+
 for theme_file in "${ROOT_DIR}"/themes/*.yaml; do
   install -m 0644 "${theme_file}" "${THEMES_DIR}/$(basename "${theme_file}")"
 done

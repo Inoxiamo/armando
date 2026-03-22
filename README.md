@@ -19,6 +19,18 @@ It stays close to your workflow so you can ask questions, rewrite text, attach i
 
 This repository is developed in a vibe-coding style, with fast iterative changes, but every change still goes through automated validation plus a double human check before any push: one review by the person or agent implementing the change, and a second human review at the parent/final check stage.
 
+### Pre-commit Secret Guard
+
+The repository ships a versioned git hook at `.githooks/pre-commit` that blocks accidental secret commits (for example real API keys or local `.env` files).
+To enable it locally:
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+```
+
+The local installer (`scripts/install-local.sh`) applies this automatically.
+
 ## Get armando
 
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>

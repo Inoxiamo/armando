@@ -246,6 +246,9 @@ mod tests {
             }),
             ollama: None,
             loaded_from: None,
+            chatgpt_api_key_from_env: false,
+            gemini_api_key_from_env: false,
+            claude_api_key_from_env: false,
         }
     }
 
