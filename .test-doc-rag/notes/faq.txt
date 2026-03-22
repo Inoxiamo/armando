@@ -1,0 +1,10 @@
+FAQ RAG TEST
+
+Q: Quale algoritmo di retrieval viene usato?
+A: Similarita coseno tra embedding della query e embedding dei chunk.
+
+Q: Dove si salva il db?
+A: Nel file configurato in rag.vector_db_path.
+
+Q: Come forzo on/off al volo?
+A: Prefisso prompt: !rag on oppure !rag off

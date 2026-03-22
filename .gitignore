@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 config.yaml
 .ai/RUST_*
+.env
+.env.*
+!.env.example

@@ -1,0 +1,4 @@
+Documento legacy in formato .doc (testuale semplificato).
+
+Questo file verifica il fallback di estrazione per estensione .doc.
+Contiene parole chiave: coseno, embedding, chunk_size, max_retrieved_docs.

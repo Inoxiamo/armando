@@ -8,10 +8,25 @@ use theme::load_theme;
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let _args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = std::env::args().collect();
     let cfg = config::Config::load()?;
+    if args.iter().any(|arg| arg == "--rag-index") {
+        return run_rag_index(cfg);
+    }
     let prompt_profiles = prompt_profiles::PromptProfiles::load(&cfg)?;
     run_ui(cfg, prompt_profiles)
+}
+
+fn run_rag_index(cfg: config::Config) -> anyhow::Result<()> {
+    let runtime = Runtime::new()?;
+    let rag = armando::rag::RagSystem::new(cfg.rag.clone());
+    let backend = cfg.default_backend.clone();
+    let stats = runtime.block_on(rag.index_documents(&backend, &cfg))?;
+    println!(
+        "RAG indexing completed: {} files, {} chunks (backend: {}).",
+        stats.indexed_files, stats.indexed_chunks, backend
+    );
+    Ok(())
 }
 
 fn run_ui(

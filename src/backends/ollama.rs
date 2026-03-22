@@ -82,6 +82,54 @@ pub(crate) fn ollama_response_text(result: &serde_json::Value) -> Result<String>
     }
 }
 
+pub async fn embed(text: &str, config: &Config) -> Result<Vec<f32>> {
+    embed_with_model(text, config, None).await
+}
+
+pub async fn embed_with_model(
+    text: &str,
+    config: &Config,
+    model_override: Option<&str>,
+) -> Result<Vec<f32>> {
+    let (base_url, model) = if let Some(ref o) = config.ollama {
+        (
+            o.base_url.trim_end_matches('/').to_string(),
+            o.model.clone(),
+        )
+    } else {
+        ("http://localhost:11434".to_string(), "llama3".to_string())
+    };
+    let preferred_model = model_override.unwrap_or(&model);
+    embed_at(&base_url, preferred_model, text).await
+}
+
+pub(crate) async fn embed_at(base_url: &str, model: &str, text: &str) -> Result<Vec<f32>> {
+    let url = format!("{}/api/embeddings", base_url.trim_end_matches('/'));
+    let payload = json!({
+        "model": model,
+        "prompt": text
+    });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+    let response = client.post(url).json(&payload).send().await?;
+    if !response.status().is_success() {
+        return Err(anyhow!(ollama_error_message(response.status())));
+    }
+    let result: serde_json::Value = response.json().await?;
+    let embedding = result["embedding"]
+        .as_array()
+        .ok_or_else(|| anyhow!("Unexpected Ollama embeddings API response structure"))?
+        .iter()
+        .filter_map(|v| v.as_f64())
+        .map(|v| v as f32)
+        .collect::<Vec<_>>();
+    if embedding.is_empty() {
+        return Err(anyhow!("Ollama embeddings API returned an empty vector"));
+    }
+    Ok(embedding)
+}
+
 async fn stream_ollama_response(
     mut response: reqwest::Response,
     progress: ResponseProgressSink,

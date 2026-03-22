@@ -165,3 +165,93 @@ pub(crate) fn openai_response_text(result: &serde_json::Value) -> Result<String>
 
     Ok(content.to_string())
 }
+
+pub async fn embed(text: &str, config: &Config) -> Result<Vec<f32>> {
+    embed_with_model(text, config, None).await
+}
+
+pub async fn embed_with_model(
+    text: &str,
+    config: &Config,
+    model_override: Option<&str>,
+) -> Result<Vec<f32>> {
+    let (api_key, model) = config
+        .chatgpt
+        .as_ref()
+        .map(|cfg| (cfg.api_key.clone(), cfg.model.clone()))
+        .ok_or_else(|| anyhow!("⚠️ ChatGPT config section not found in config.yaml."))?;
+
+    let preferred_model = model_override.unwrap_or(&model);
+
+    match embed_at(
+        "https://api.openai.com/v1/embeddings",
+        preferred_model,
+        text,
+        &api_key,
+    )
+    .await
+    {
+        Ok(embedding) => Ok(embedding),
+        Err(_) if preferred_model != "text-embedding-3-small" => {
+            embed_at(
+                "https://api.openai.com/v1/embeddings",
+                "text-embedding-3-small",
+                text,
+                &api_key,
+            )
+            .await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub(crate) async fn embed_at(
+    url: &str,
+    embedding_model: &str,
+    text: &str,
+    api_key: &str,
+) -> Result<Vec<f32>> {
+    if api_key.is_empty() || api_key == "YOUR_OPENAI_API_KEY" {
+        return Err(anyhow!(
+            "⚠️ OpenAI API key not configured. Edit config.yaml and set chatgpt.api_key."
+        ));
+    }
+
+    let payload = json!({
+        "model": embedding_model,
+        "input": text
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+    let response = client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&payload)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(openai_error_message(
+            status,
+            &text,
+            embedding_model
+        )));
+    }
+
+    let result: serde_json::Value = response.json().await?;
+    let embedding = result["data"][0]["embedding"]
+        .as_array()
+        .ok_or_else(|| anyhow!("Unexpected OpenAI embeddings API response structure"))?
+        .iter()
+        .filter_map(|v| v.as_f64())
+        .map(|v| v as f32)
+        .collect::<Vec<_>>();
+    if embedding.is_empty() {
+        return Err(anyhow!("OpenAI embeddings API returned an empty vector"));
+    }
+    Ok(embedding)
+}

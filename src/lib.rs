@@ -6,6 +6,7 @@ pub mod history;
 pub mod i18n;
 pub mod logging;
 pub mod prompt_profiles;
+pub mod rag;
 pub mod theme;
 pub mod update;
 pub mod window_context;

@@ -1,6 +1,6 @@
 aliases: null
 auto_read_selection: true
-default_backend: chatgpt
+default_backend: gemini
 theme:
   name: nerv-hud
   path: null
@@ -10,10 +10,23 @@ ui:
 history:
   enabled: false
 logging:
-  enabled: false
+  enabled: true
+update:
+  beta: true
+rag:
+  enabled: true
+  mode: vector
+  documents_folder: YOUR_RAG_DOCUMENTS_FOLDER
+  vector_db_path: .armando-rag.sqlite3
+  max_retrieved_docs: 5
+  chunk_size: 600
+  embedding_backend: ollama
+  embedding_model: nomic-embed-text
+  retrieval_mode: vector
+  runtime_override: default
 gemini:
   api_key: YOUR_GEMINI_API_KEY
-  model: gemini-1.5-flash
+  model: gemini-flash-lite-latest
 chatgpt:
   api_key: YOUR_OPENAI_API_KEY
   model: gpt-4o-mini
@@ -22,4 +35,4 @@ claude:
   model: claude-3-5-sonnet-latest
 ollama:
   base_url: http://localhost:11434
-  model: gemma3:latest
+  model: gemma3:4b

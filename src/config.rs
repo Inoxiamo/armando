@@ -28,6 +28,34 @@ pub struct OllamaConfig {
     pub model: String,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RagMode {
+    Keyword,
+    #[default]
+    Vector,
+    Hybrid,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RagConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: RagMode,
+    pub documents_folder: Option<PathBuf>,
+    #[serde(default = "default_rag_vector_db_path")]
+    pub vector_db_path: PathBuf,
+    #[serde(default = "default_rag_max_retrieved_docs")]
+    pub max_retrieved_docs: usize,
+    #[serde(default = "default_rag_chunk_size")]
+    pub chunk_size: usize,
+    #[serde(default)]
+    pub embedding_backend: Option<String>,
+    #[serde(default)]
+    pub embedding_model: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ThemeConfig {
     #[serde(default = "default_theme_name", alias = "preset")]
@@ -53,6 +81,12 @@ pub struct LoggingConfig {
 pub struct HistoryConfig {
     #[serde(default)]
     pub enabled: bool,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
+pub struct UpdateConfig {
+    #[serde(default)]
+    pub beta: bool,
 }
 
 impl Default for UiConfig {
@@ -90,6 +124,10 @@ pub struct Config {
     pub history: HistoryConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub update: UpdateConfig,
+    #[serde(default)]
+    pub rag: RagConfig,
     pub gemini: Option<GeminiConfig>,
     pub chatgpt: Option<ChatGptConfig>,
     pub claude: Option<ClaudeConfig>,
@@ -108,6 +146,8 @@ impl Default for Config {
             ui: UiConfig::default(),
             history: HistoryConfig::default(),
             logging: LoggingConfig::default(),
+            update: UpdateConfig::default(),
+            rag: RagConfig::default(),
             gemini: None,
             chatgpt: None,
             claude: None,
@@ -137,13 +177,43 @@ fn default_window_height() -> f32 {
     600.0
 }
 
+fn default_rag_vector_db_path() -> PathBuf {
+    PathBuf::from(".armando-rag.sqlite3")
+}
+
+fn default_rag_max_retrieved_docs() -> usize {
+    4
+}
+
+fn default_rag_chunk_size() -> usize {
+    1200
+}
+
+impl Default for RagConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: RagMode::Vector,
+            documents_folder: None,
+            vector_db_path: default_rag_vector_db_path(),
+            max_retrieved_docs: default_rag_max_retrieved_docs(),
+            chunk_size: default_rag_chunk_size(),
+            embedding_backend: None,
+            embedding_model: None,
+        }
+    }
+}
+
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
+        let _ = dotenvy::dotenv();
+
         for path in app_paths::candidate_config_paths()? {
             if path.exists() {
                 log::info!("Loading config from {}", path.display());
                 let content = std::fs::read_to_string(&path)?;
                 let mut config: Self = serde_yaml::from_str(&content)?;
+                apply_env_overrides(&mut config);
                 config.loaded_from = Some(path);
                 return Ok(config);
             }
@@ -159,7 +229,10 @@ impl Config {
                 .ok()
                 .and_then(|content| serde_yaml::from_str::<Self>(&content).ok())
             {
-                Some(config) => return Ok(config),
+                Some(mut config) => {
+                    apply_env_overrides(&mut config);
+                    return Ok(config);
+                }
                 None => {
                     log::warn!(
                         "Bundled default config at {} could not be loaded, falling back to built-in defaults",
@@ -171,7 +244,9 @@ impl Config {
             log::warn!("No config file found and no bundled defaults were available");
         }
 
-        Ok(Self::default())
+        let mut config = Self::default();
+        apply_env_overrides(&mut config);
+        Ok(config)
     }
 
     pub fn save(&mut self) -> anyhow::Result<()> {
@@ -204,9 +279,54 @@ impl Config {
     }
 }
 
+fn first_env(keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| std::env::var(key).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_env_overrides(config: &mut Config) {
+    if let Some(api_key) = first_env(&["ARMANDO_GEMINI_API_KEY", "GEMINI_API_KEY"]) {
+        let section = config.gemini.get_or_insert(GeminiConfig {
+            api_key: String::new(),
+            model: "gemini-1.5-flash".to_string(),
+        });
+        section.api_key = api_key;
+    }
+
+    if let Some(api_key) = first_env(&["ARMANDO_OPENAI_API_KEY", "OPENAI_API_KEY"]) {
+        let section = config.chatgpt.get_or_insert(ChatGptConfig {
+            api_key: String::new(),
+            model: "gpt-4o-mini".to_string(),
+        });
+        section.api_key = api_key;
+    }
+
+    if let Some(api_key) = first_env(&["ARMANDO_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"]) {
+        let section = config.claude.get_or_insert(ClaudeConfig {
+            api_key: String::new(),
+            model: "claude-3-5-sonnet-latest".to_string(),
+        });
+        section.api_key = api_key;
+    }
+
+    if let Some(documents_folder) = first_env(&["ARMANDO_RAG_DOCUMENTS_FOLDER"]) {
+        config.rag.documents_folder = Some(PathBuf::from(documents_folder));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[test]
     fn theme_config_defaults_to_default_dark() {
@@ -235,11 +355,69 @@ mod tests {
         assert_eq!(config.ui.window_height, 600.0);
         assert!(!config.history.enabled);
         assert!(!config.logging.enabled);
+        assert!(!config.update.beta);
+        assert!(!config.rag.enabled);
+        assert_eq!(config.rag.mode, RagMode::Vector);
+        assert!(config.rag.documents_folder.is_none());
+        assert_eq!(
+            config.rag.vector_db_path,
+            PathBuf::from(".armando-rag.sqlite3")
+        );
+        assert_eq!(config.rag.max_retrieved_docs, 4);
+        assert_eq!(config.rag.chunk_size, 1200);
+        assert!(config.rag.embedding_backend.is_none());
+        assert!(config.rag.embedding_model.is_none());
+    }
+
+    #[test]
+    fn rag_config_deserializes_mode_and_embedding_overrides() {
+        let yaml = r#"
+rag:
+  mode: hybrid
+  embedding_backend: chatgpt
+  embedding_model: text-embedding-3-large
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(config.rag.mode, RagMode::Hybrid);
+        assert_eq!(config.rag.embedding_backend.as_deref(), Some("chatgpt"));
+        assert_eq!(
+            config.rag.embedding_model.as_deref(),
+            Some("text-embedding-3-large")
+        );
     }
 
     #[test]
     fn load_template_returns_none_when_template_is_missing() {
         let template = Config::load_template("missing-template").unwrap();
         assert!(template.is_none());
+    }
+
+    #[test]
+    fn env_overrides_are_applied_to_api_keys() {
+        let _guard = env_lock();
+        std::env::set_var("ARMANDO_OPENAI_API_KEY", "from-env-openai");
+        std::env::set_var("ARMANDO_GEMINI_API_KEY", "from-env-gemini");
+        std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "from-env-claude");
+
+        let mut config = Config::default();
+        apply_env_overrides(&mut config);
+
+        assert_eq!(
+            config.chatgpt.as_ref().map(|cfg| cfg.api_key.as_str()),
+            Some("from-env-openai")
+        );
+        assert_eq!(
+            config.gemini.as_ref().map(|cfg| cfg.api_key.as_str()),
+            Some("from-env-gemini")
+        );
+        assert_eq!(
+            config.claude.as_ref().map(|cfg| cfg.api_key.as_str()),
+            Some("from-env-claude")
+        );
+
+        std::env::remove_var("ARMANDO_OPENAI_API_KEY");
+        std::env::remove_var("ARMANDO_GEMINI_API_KEY");
+        std::env::remove_var("ARMANDO_ANTHROPIC_API_KEY");
     }
 }

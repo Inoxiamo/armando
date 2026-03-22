@@ -3,9 +3,10 @@ name: Sonar
 on:
   push:
     branches:
-      - main
       - master
   pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 env:
@@ -15,6 +16,7 @@ env:
 jobs:
   sonar:
     name: Sonar Scan
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name == 'master' }}
     runs-on: ubuntu-latest
 
     steps:

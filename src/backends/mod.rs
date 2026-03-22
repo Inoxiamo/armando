@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::history;
 use crate::logging;
 use crate::prompt_profiles::PromptProfiles;
+use crate::rag::{RagRuntimeOverride, RagSystem, RetrievedDocument};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,15 +70,48 @@ pub async fn query(
     mode: PromptMode,
     progress: Option<ResponseProgressSink>,
 ) -> String {
-    logging::log_request(config, backend, input);
-    let prepared_prompt = prepare_prompt(
-        &input.prompt,
-        &input.conversation,
-        prompt_profiles,
-        mode,
-        !input.images.is_empty(),
-        input.active_window_context.as_deref(),
-    );
+    let request_id = logging::log_request(config, backend, input);
+    let (effective_prompt, rag_override) = RagSystem::parse_prompt_override(&input.prompt);
+    let rag_enabled = match rag_override {
+        RagRuntimeOverride::Default => config.rag.enabled,
+        RagRuntimeOverride::ForceOn => true,
+        RagRuntimeOverride::ForceOff => false,
+    };
+
+    let retrieved_docs = if rag_enabled {
+        let rag = RagSystem::new(config.rag.clone());
+        match rag.retrieve(backend, &effective_prompt, config).await {
+            Ok(docs) => docs,
+            Err(err) => {
+                log::warn!("RAG retrieval failed: {err:#}");
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
+    let prepared_prompt = if retrieved_docs.is_empty() {
+        prepare_prompt(
+            &effective_prompt,
+            &input.conversation,
+            prompt_profiles,
+            mode,
+            !input.images.is_empty(),
+            input.active_window_context.as_deref(),
+        )
+    } else {
+        prepare_prompt_with_retrieval(
+            &effective_prompt,
+            &input.conversation,
+            prompt_profiles,
+            mode,
+            !input.images.is_empty(),
+            input.active_window_context.as_deref(),
+            &retrieved_docs,
+        )
+    };
+    logging::log_prepared_prompt(config, request_id, backend, input, &prepared_prompt);
     let res = match backend {
         "chatgpt" => chatgpt::query(&prepared_prompt, &input.images, config).await,
         "claude" => claude::query(&prepared_prompt, &input.images, config).await,
@@ -88,7 +122,7 @@ pub async fn query(
 
     match res {
         Ok(text) => {
-            logging::log_success(config, backend, input, &text);
+            logging::log_success(config, request_id, backend, input, &text);
             if config.history.enabled {
                 if let Ok(entry) = history::new_entry(backend, &input.prompt, &text) {
                     let _ = history::append_entry(entry);
@@ -98,10 +132,57 @@ pub async fn query(
         }
         Err(e) => {
             log::error!("{backend} error: {e:?}");
-            logging::log_error(config, backend, input, &e.to_string());
+            logging::log_error(config, request_id, backend, input, &e.to_string());
             format!("❌ {backend} error: {e}")
         }
     }
+}
+
+pub async fn embed_text(backend: &str, text: &str, config: &Config) -> Result<Vec<f32>, String> {
+    let (embedding_backend, embedding_model) = resolve_embedding_request(backend, config);
+    embed_text_with_model(embedding_backend, text, config, embedding_model).await
+}
+
+pub async fn embed_text_with_model(
+    backend: &str,
+    text: &str,
+    config: &Config,
+    model_override: Option<&str>,
+) -> Result<Vec<f32>, String> {
+    match backend {
+        "chatgpt" => chatgpt::embed_with_model(text, config, model_override)
+            .await
+            .map_err(|err| err.to_string()),
+        "claude" => claude::embed_with_model(text, config, model_override)
+            .await
+            .map_err(|err| err.to_string()),
+        "gemini" => gemini::embed_with_model(text, config, model_override)
+            .await
+            .map_err(|err| err.to_string()),
+        "ollama" => ollama::embed_with_model(text, config, model_override)
+            .await
+            .map_err(|err| err.to_string()),
+        _ => Err(format!("Unsupported backend for embeddings: {backend}")),
+    }
+}
+
+fn resolve_embedding_request<'a>(
+    backend: &'a str,
+    config: &'a Config,
+) -> (&'a str, Option<&'a str>) {
+    let embedding_backend = config
+        .rag
+        .embedding_backend
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(backend);
+    let embedding_model = config
+        .rag
+        .embedding_model
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+
+    (embedding_backend, embedding_model)
 }
 
 pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result<String, String> {
@@ -694,6 +775,26 @@ fn prepare_prompt(
     has_images: bool,
     active_window_context: Option<&str>,
 ) -> String {
+    prepare_prompt_with_retrieval(
+        prompt,
+        conversation,
+        prompt_profiles,
+        mode,
+        has_images,
+        active_window_context,
+        &[],
+    )
+}
+
+fn prepare_prompt_with_retrieval(
+    prompt: &str,
+    conversation: &[ConversationTurn],
+    prompt_profiles: &PromptProfiles,
+    mode: PromptMode,
+    has_images: bool,
+    active_window_context: Option<&str>,
+    retrieved_docs: &[RetrievedDocument],
+) -> String {
     let (expanded_prompt, detected_tags) = match mode {
         PromptMode::TextAssist => expand_tags(
             prompt,
@@ -784,6 +885,25 @@ fn prepare_prompt(
             "Automatically apply these context instructions: {}.",
             detected_tags.join(", ")
         ));
+    }
+
+    if !retrieved_docs.is_empty() {
+        instructions.push("Use the retrieved context below as additional grounding instructions when relevant. If retrieved context conflicts with the direct user request, prioritize the user request.".to_string());
+        let context = retrieved_docs
+            .iter()
+            .enumerate()
+            .map(|(idx, doc)| {
+                format!(
+                    "[{}] source={} score={:.4}\n{}",
+                    idx + 1,
+                    doc.file_path,
+                    doc.score,
+                    doc.chunk_text.trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        instructions.push(format!("Retrieved context:\n{context}"));
     }
 
     let effective_prompt = if expanded_prompt.trim().is_empty() && has_images {
@@ -944,7 +1064,8 @@ fn normalize_tag(tag: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::{
-        ClaudeConfig, Config, HistoryConfig, LoggingConfig, ThemeConfig, UiConfig,
+        ClaudeConfig, Config, HistoryConfig, LoggingConfig, RagConfig, ThemeConfig, UiConfig,
+        UpdateConfig,
     };
     use crate::prompt_profiles::{GenericPromptTag, PromptProfiles};
     use std::collections::HashMap;
@@ -962,6 +1083,8 @@ mod tests {
             ui: UiConfig::default(),
             history: HistoryConfig::default(),
             logging: LoggingConfig::default(),
+            update: UpdateConfig::default(),
+            rag: RagConfig::default(),
             gemini: None,
             chatgpt: None,
             claude: Some(ClaudeConfig {
@@ -971,6 +1094,28 @@ mod tests {
             ollama: None,
             loaded_from: None,
         }
+    }
+
+    #[test]
+    fn embedding_request_uses_rag_overrides_when_present() {
+        let mut config = test_config();
+        config.rag.embedding_backend = Some("claude".to_string());
+        config.rag.embedding_model = Some("embed-2024".to_string());
+
+        let (backend, model) = resolve_embedding_request("chatgpt", &config);
+
+        assert_eq!(backend, "claude");
+        assert_eq!(model, Some("embed-2024"));
+    }
+
+    #[test]
+    fn embedding_request_falls_back_to_selected_backend_when_overrides_are_missing() {
+        let config = test_config();
+
+        let (backend, model) = resolve_embedding_request("gemini", &config);
+
+        assert_eq!(backend, "gemini");
+        assert_eq!(model, None);
     }
 
     fn test_profiles() -> PromptProfiles {

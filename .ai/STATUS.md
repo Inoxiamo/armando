@@ -38,6 +38,9 @@
 - Optional debug logging for requests and errors, disabled by default and intended only for diagnostics
 - Provider settings can load the currently available models from the backend API or local Ollama server and let the user pick them from a dropdown
 - Provider settings show a residual-credit indicator, with `∞` for Ollama and `n/d` for cloud providers that do not expose reliable balance data here
+- RAG system with recursive document indexing and retrieval modes: `keyword` (SQLite FTS5/BM25), `vector` (cosine over embeddings), and `hybrid` (merged lexical + vector scores)
+- RAG settings now include mode selection plus optional embedding backend/model overrides for vector/hybrid retrieval
+- RAG settings panel section is collapsible and includes in-app indexing controls
 - Main prompt and response actions now live in compact toolbars near their respective editors instead of large text buttons below the prompt
 - Prompt and response editors can now be resized directly with the mouse by dragging their lower edge
 - Provider configuration sections are closed by default in settings, including the Ollama URL/model section
@@ -107,6 +110,9 @@
 - In `Generic question` mode, the `CMD` tag requests only the final command; without a command-style preset, the answer is formatted as Markdown
 - Explicit language overrides in either mode accept short aliases such as `EN`, `IT`, `ES`, `FR`, `DE`, `JA` and broader names such as `ENGLISH`, `ITALIAN`, `SPANISH`, `FRENCH`, `GERMAN`, `JAPANESE`, plus additional common language aliases
 - In `Generic question` mode, text-assist aliases and rewrite-oriented prompt expansions are bypassed, even if in-memory chat session mode is enabled
+- RAG retrieval mode comes from config/UI and can be overridden per-prompt with `!rag on` and `!rag off`
+- In `keyword` mode, indexing/retrieval does not call embedding APIs
+- In `vector` and `hybrid` modes, embedding generation can use `rag.embedding_backend` and `rag.embedding_model`, independent from the active query backend
 
 ## Known Gaps
 
@@ -114,6 +120,7 @@
 - No automated UI tests for layout, scrolling, and popup interactions
 - No pixel-level validation yet for `egui` layout behavior across DPI scales, desktop environments, and maximized windows
 - No safe terminal or MCP tool integration yet
+- Hybrid score fusion is intentionally simple and may need domain-specific tuning for best relevance
 - No silent in-place auto-update yet; updates remain explicit and guided through release downloads and installers
 - Window icon visibility may still vary by desktop environment even when the app id and desktop entry are aligned
 - Voice dictation currently depends on system audio capture tools and an OpenAI API key for transcription
@@ -130,3 +137,4 @@
 - Add higher-confidence UI regression coverage for editor sizing, viewport changes, and layout edge cases
 - Evaluate a beta tools mode for terminal/CLI/MCP behind explicit confirmation
 - Harden and document the guided release update path across all supported platforms
+- Refine hybrid retrieval weighting and optional reranking strategy

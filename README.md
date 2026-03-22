@@ -11,6 +11,7 @@ It stays close to your workflow so you can ask questions, rewrite text, attach i
 - External YAML configuration, themes, locales, and prompt preset files
 - In-app GitHub release check with version comparison and download shortcut when an update is available
 - Optional local history and optional debug logging
+- Optional RAG with `keyword`, `vector`, or `hybrid` retrieval modes
 - Image attachments, clipboard image paste, and voice dictation
 - Release bundles for Linux, macOS, and Windows
 
@@ -50,12 +51,41 @@ armando/
 The ChatGPT backend uses OpenAI's Responses API.
 For exact install paths and first configuration on each OS, see [`INSTALL.md`](INSTALL.md).
 
+API keys can be loaded from environment variables (or a local `.env` file in the project/app working directory):
+
+- `ARMANDO_OPENAI_API_KEY` (or `OPENAI_API_KEY`)
+- `ARMANDO_GEMINI_API_KEY` (or `GEMINI_API_KEY`)
+- `ARMANDO_ANTHROPIC_API_KEY` (or `ANTHROPIC_API_KEY`)
+
+Keep `.env` local and uncommitted.
+
 The `ui` section supports visual preferences such as language and initial window height. Example:
 
 ```yaml
 ui:
   language: "it"
   window_height: 640
+```
+
+Update channel can be pinned to stable-only or include RC builds:
+
+```yaml
+update:
+  beta: false # true = include prerelease/RC updates
+```
+
+RAG is configured under `rag` and can be switched between lexical and semantic retrieval:
+
+```yaml
+rag:
+  enabled: true
+  mode: keyword # keyword | vector | hybrid
+  documents_folder: ".test-doc-rag"
+  vector_db_path: ".armando-rag.sqlite3"
+  max_retrieved_docs: 4
+  chunk_size: 1200
+  embedding_backend: "gemini" # optional, for vector/hybrid
+  embedding_model: "embedding-001" # optional, for vector/hybrid
 ```
 
 When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
@@ -77,10 +107,24 @@ When the settings panel is open, the footer shows the current app version and, o
 ## Planned
 
 - MCP integration for safe external tools and richer runtime context
-- RAG support for retrieving project docs, notes, and release context before larger changes
 - Agent-oriented workflow improvements with clearer delegation, recap, and push-gating rules
 - Beta tools panel for terminal, CLI, MCP, and backend-status visibility
 - Safer command execution flow with explicit confirmation for sensitive actions
+
+## RAG Modes
+
+- `keyword`: lexical retrieval with SQLite FTS5/BM25; no embedding API calls.
+- `vector`: embedding-based retrieval with cosine similarity.
+- `hybrid`: combines lexical + vector scores.
+
+When vector scoring is active, `rag.embedding_backend` and `rag.embedding_model` let you decouple embedding from the currently selected query backend/model.
+Runtime prompt overrides are available with `!rag on` and `!rag off`.
+
+To pre-index documents offline:
+
+```bash
+cargo run -- --rag-index
+```
 
 ## Prompt Presets
 

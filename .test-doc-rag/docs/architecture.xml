@@ -1,0 +1,10 @@
+<architecture>
+  <module name="rag">
+    <purpose>Recupero chunk tramite similarita coseno</purpose>
+    <storage>SQLite locale</storage>
+    <note>Top-N di default uguale a 4</note>
+  </module>
+  <module name="ui">
+    <hint>Esiste una sezione Settings per attivare RAG e cambiare chunk_size</hint>
+  </module>
+</architecture>

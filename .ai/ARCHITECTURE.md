@@ -7,6 +7,8 @@
 - Async runtime: `tokio`
 - HTTP client: `reqwest`
 - Configuration: `serde_yaml`
+- Local retrieval storage: `rusqlite` (SQLite + FTS5)
+- Document ingestion: `walkdir`, `pdf-extract`, `calamine`
 - Clipboard: `arboard`
 - File picker: `rfd`
 
@@ -38,6 +40,9 @@
 
 - `src/backends/*`
   Backend integrations for Ollama, ChatGPT/OpenAI, Gemini, and Claude, including multimodal image payload mapping and provider-specific available-model discovery. The query layer now also accepts an optional progress sink so Ollama can emit incremental response chunks while the other providers keep the single-shot path for now.
+
+- `src/rag.rs`
+  RAG orchestration with recursive ingestion, chunking, SQLite persistence, and runtime retrieval. Supports three modes: `keyword` (SQLite FTS5/BM25), `vector` (embedding cosine similarity), and `hybrid` (merged normalized lexical + vector scores). Embedding generation can use either the active query backend/model or dedicated overrides from `rag.embedding_backend` and `rag.embedding_model`.
 
 - `src/window_context.rs`
   Best-effort active-window context discovery. It supports an env override plus platform-specific probes such as `hyprctl`, `swaymsg`, `xdotool`, `osascript`, and PowerShell, then normalizes the result before it is used only as a backend hint.
@@ -79,23 +84,24 @@
 11. Voice dictation records to a temporary audio file and sends it to OpenAI transcription before appending text to the prompt
 12. The user submits a prompt
 13. The app captures a best-effort active-window context hint before dispatch when the platform can provide one
-14. An async task queries the selected backend
-15. If debug logging is enabled, the app appends request and outcome events to a local JSONL log file
-16. Ollama can stream response chunks into the UI progressively, while the cloud providers still resolve through the final-response path
-17. Successful responses are always appended to in-memory session history
-18. If local history is enabled, successful responses are also appended to saved history on disk
-19. The response is rendered in the popup
-20. The user can change theme, language, backend, models, credentials, history, and debug settings from the settings panel with immediate persistence
-21. Provider sections stay collapsed by default and can asynchronously load model lists from the configured backend, including the currently editable Ollama base URL
-22. The settings panel also surfaces a lightweight credit-availability indicator: `∞` for local Ollama usage and `n/d` for cloud providers whose remaining balance is not exposed through this integration
-23. Opening the settings side panel can widen the viewport when needed so the main content area keeps a usable preview width
-24. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
-25. The settings footer can asynchronously query GitHub for the latest published release and compare it with the local app version
-26. When a newer release exists, the user can open the latest downloadable release directly from the settings footer or use the bootstrap shortcut on Linux and macOS
-27. Downloaded release bundles can be installed directly through the bundled platform-specific install scripts
-28. Linux and macOS users can alternatively bootstrap install or update through a remote wrapper that downloads the correct release bundle and then invokes the bundled installer
-29. Toolbar SVG textures are regenerated when `egui` reports a different `pixels_per_point` scale so icon rendering stays sharp after DPI changes
-30. Prompt preparation resolves style tags from external preset files, applies language fallback once at the app level instead of repeating that rule inside each preset, and can inject active-window context only as a hint
+14. If RAG is enabled, the prompt passes through retrieval interposition before final prompt preparation
+15. An async task queries the selected backend
+16. If debug logging is enabled, the app appends request and outcome events to a local JSONL log file
+17. Ollama can stream response chunks into the UI progressively, while the cloud providers still resolve through the final-response path
+18. Successful responses are always appended to in-memory session history
+19. If local history is enabled, successful responses are also appended to saved history on disk
+20. The response is rendered in the popup
+21. The user can change theme, language, backend, models, credentials, RAG mode/settings, history, and debug settings from the settings panel with immediate persistence
+22. Provider sections stay collapsed by default and can asynchronously load model lists from the configured backend, including the currently editable Ollama base URL
+23. The settings panel also surfaces a lightweight credit-availability indicator: `∞` for local Ollama usage and `n/d` for cloud providers whose remaining balance is not exposed through this integration
+24. Opening the settings side panel can widen the viewport when needed so the main content area keeps a usable preview width
+25. Local installation can register a desktop icon and launcher entry that match the app viewport identity on Linux
+26. The settings footer can asynchronously query GitHub for the latest published release and compare it with the local app version
+27. When a newer release exists, the user can open the latest downloadable release directly from the settings footer or use the bootstrap shortcut on Linux and macOS
+28. Downloaded release bundles can be installed directly through the bundled platform-specific install scripts
+29. Linux and macOS users can alternatively bootstrap install or update through a remote wrapper that downloads the correct release bundle and then invokes the bundled installer
+30. Toolbar SVG textures are regenerated when `egui` reports a different `pixels_per_point` scale so icon rendering stays sharp after DPI changes
+31. Prompt preparation resolves style tags from external preset files, applies language fallback once at the app level instead of repeating that rule inside each preset, and can inject active-window context only as a hint
 
 ## UI Structure
 

@@ -10,6 +10,17 @@ history:
   enabled: false
 logging:
   enabled: false
+update:
+  beta: false
+rag:
+  enabled: false
+  mode: vector
+  documents_folder: null
+  vector_db_path: .armando-rag.sqlite3
+  max_retrieved_docs: 4
+  chunk_size: 1200
+  embedding_backend: null
+  embedding_model: null
 gemini:
   api_key: YOUR_GEMINI_API_KEY
   model: gemini-1.5-flash

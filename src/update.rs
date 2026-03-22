@@ -3,6 +3,8 @@ use serde::Deserialize;
 pub const GITHUB_RELEASES_LATEST_URL: &str = "https://github.com/Inoxiamo/armando/releases/latest";
 pub const GITHUB_RELEASES_API_URL: &str =
     "https://api.github.com/repos/Inoxiamo/armando/releases/latest";
+pub const GITHUB_RELEASES_API_LIST_URL: &str =
+    "https://api.github.com/repos/Inoxiamo/armando/releases?per_page=20";
 pub const GITHUB_BOOTSTRAP_SCRIPT_URL: &str =
     "https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh";
 
@@ -25,29 +27,51 @@ pub struct ReleaseInfo {
     pub release_url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct GithubRelease {
     tag_name: String,
     html_url: String,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
 }
 
-pub async fn fetch_latest_release() -> Result<ReleaseInfo, String> {
+pub async fn fetch_latest_release(include_beta: bool) -> Result<ReleaseInfo, String> {
     let client = reqwest::Client::builder()
         .build()
         .map_err(|err| format!("Could not initialize update client: {err}"))?;
 
-    let release = client
-        .get(GITHUB_RELEASES_API_URL)
-        .header(reqwest::header::USER_AGENT, "armando-update-check")
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|err| format!("Could not contact GitHub: {err}"))?
-        .error_for_status()
-        .map_err(|err| format!("GitHub returned an error while checking updates: {err}"))?
-        .json::<GithubRelease>()
-        .await
-        .map_err(|err| format!("Could not parse GitHub release information: {err}"))?;
+    let release = if include_beta {
+        let releases = client
+            .get(GITHUB_RELEASES_API_LIST_URL)
+            .header(reqwest::header::USER_AGENT, "armando-update-check")
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|err| format!("Could not contact GitHub: {err}"))?
+            .error_for_status()
+            .map_err(|err| format!("GitHub returned an error while checking updates: {err}"))?
+            .json::<Vec<GithubRelease>>()
+            .await
+            .map_err(|err| format!("Could not parse GitHub release information: {err}"))?;
+
+        select_latest_release(releases, true)
+            .ok_or_else(|| "No eligible GitHub release found for beta channel.".to_string())?
+    } else {
+        client
+            .get(GITHUB_RELEASES_API_URL)
+            .header(reqwest::header::USER_AGENT, "armando-update-check")
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|err| format!("Could not contact GitHub: {err}"))?
+            .error_for_status()
+            .map_err(|err| format!("GitHub returned an error while checking updates: {err}"))?
+            .json::<GithubRelease>()
+            .await
+            .map_err(|err| format!("Could not parse GitHub release information: {err}"))?
+    };
 
     Ok(ReleaseInfo {
         version: normalize_version_tag(&release.tag_name),
@@ -125,6 +149,16 @@ fn parse_version(version: &str) -> Option<ParsedVersion> {
 
 fn normalize_version_tag(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
+}
+
+fn select_latest_release(
+    releases: Vec<GithubRelease>,
+    include_beta: bool,
+) -> Option<GithubRelease> {
+    releases
+        .into_iter()
+        .filter(|release| !release.draft)
+        .find(|release| include_beta || !release.prerelease)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -313,5 +347,28 @@ mod tests {
         assert_eq!(guide.platform_label, "Windows");
         assert!(guide.detail.contains("install.ps1"));
         assert!(matches!(guide.action, UpdateAction::OpenReleasePage));
+    }
+
+    #[test]
+    fn release_selector_respects_beta_channel() {
+        let releases = vec![
+            GithubRelease {
+                tag_name: "v0.0.4-rc1".to_string(),
+                html_url: "https://example/rc".to_string(),
+                prerelease: true,
+                draft: false,
+            },
+            GithubRelease {
+                tag_name: "v0.0.3".to_string(),
+                html_url: "https://example/stable".to_string(),
+                prerelease: false,
+                draft: false,
+            },
+        ];
+        let beta = select_latest_release(releases.clone(), true).unwrap();
+        assert_eq!(beta.tag_name, "v0.0.4-rc1");
+
+        let stable_only = select_latest_release(releases, false).unwrap();
+        assert_eq!(stable_only.tag_name, "v0.0.3");
     }
 }

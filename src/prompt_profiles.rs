@@ -345,7 +345,9 @@ fn built_in_language_tags() -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, HistoryConfig, LoggingConfig, ThemeConfig, UiConfig};
+    use crate::config::{
+        Config, HistoryConfig, LoggingConfig, RagConfig, ThemeConfig, UiConfig, UpdateConfig,
+    };
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -361,6 +363,8 @@ mod tests {
             ui: UiConfig::default(),
             history: HistoryConfig::default(),
             logging: LoggingConfig::default(),
+            update: UpdateConfig::default(),
+            rag: RagConfig::default(),
             gemini: None,
             chatgpt: None,
             claude: None,

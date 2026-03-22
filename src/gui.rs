@@ -19,6 +19,7 @@ use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
 use crate::prompt_profiles::PromptProfiles;
+use crate::rag::RagSystem;
 use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
 use crate::update::{self, ReleaseInfo, UpdateAction};
 use crate::window_context;
@@ -341,7 +342,214 @@ enum ReleaseCheckState {
     Error(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RagRetrievalMode {
+    Keyword,
+    Vector,
+    Hybrid,
+}
+
+impl RagRetrievalMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Keyword => "keyword",
+            Self::Vector => "vector",
+            Self::Hybrid => "hybrid",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "keyword" => Self::Keyword,
+            "hybrid" => Self::Hybrid,
+            _ => Self::Vector,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RagRuntimeUiOverride {
+    Default,
+    ForceOn,
+    ForceOff,
+}
+
+impl RagRuntimeUiOverride {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::ForceOn => "force_on",
+            Self::ForceOff => "force_off",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "force_on" => Self::ForceOn,
+            "force_off" => Self::ForceOff,
+            _ => Self::Default,
+        }
+    }
+
+    fn apply_to_prompt(self, prompt: &str) -> String {
+        match self {
+            Self::Default => prompt.to_string(),
+            Self::ForceOn => format!("!rag on {prompt}"),
+            Self::ForceOff => format!("!rag off {prompt}"),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct RagUiSettings {
+    retrieval_mode: RagRetrievalMode,
+    runtime_override: RagRuntimeUiOverride,
+    embedding_backend: String,
+    embedding_model: String,
+}
+
 const SESSION_HISTORY_LIMIT: usize = 24;
+
+fn default_rag_ui_settings(config: &Config) -> RagUiSettings {
+    let embedding_backend = if config.default_backend.trim().is_empty() {
+        "ollama".to_string()
+    } else {
+        config.default_backend.clone()
+    };
+
+    let embedding_model = default_rag_embedding_model(config, &embedding_backend);
+    RagUiSettings {
+        retrieval_mode: RagRetrievalMode::Vector,
+        runtime_override: RagRuntimeUiOverride::Default,
+        embedding_backend,
+        embedding_model,
+    }
+}
+
+fn default_rag_embedding_model(config: &Config, backend: &str) -> String {
+    match backend {
+        "chatgpt" => "text-embedding-3-small".to_string(),
+        "claude" => "claude-embedding-1".to_string(),
+        "gemini" => "text-embedding-004".to_string(),
+        "ollama" => config
+            .ollama
+            .as_ref()
+            .map(|value| value.model.clone())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "llama3".to_string()),
+        _ => "text-embedding-3-small".to_string(),
+    }
+}
+
+fn load_rag_ui_settings(config: &Config, fallback: &RagUiSettings) -> RagUiSettings {
+    let mut settings = fallback.clone();
+
+    let Some(path) = &config.loaded_from else {
+        return settings;
+    };
+
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return settings;
+    };
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&raw) else {
+        return settings;
+    };
+
+    let rag_key = serde_yaml::Value::String("rag".to_string());
+    let Some(root) = value.as_mapping() else {
+        return settings;
+    };
+    let Some(rag) = root.get(&rag_key).and_then(serde_yaml::Value::as_mapping) else {
+        return settings;
+    };
+
+    let retrieval_mode_key = serde_yaml::Value::String("retrieval_mode".to_string());
+    if let Some(mode) = rag
+        .get(&retrieval_mode_key)
+        .and_then(serde_yaml::Value::as_str)
+    {
+        settings.retrieval_mode = RagRetrievalMode::from_str(mode);
+    }
+
+    let runtime_override_key = serde_yaml::Value::String("runtime_override".to_string());
+    if let Some(value) = rag
+        .get(&runtime_override_key)
+        .and_then(serde_yaml::Value::as_str)
+    {
+        settings.runtime_override = RagRuntimeUiOverride::from_str(value);
+    }
+
+    let embedding_backend_key = serde_yaml::Value::String("embedding_backend".to_string());
+    if let Some(backend) = rag
+        .get(&embedding_backend_key)
+        .and_then(serde_yaml::Value::as_str)
+    {
+        let backend = backend.trim();
+        if !backend.is_empty() {
+            settings.embedding_backend = backend.to_string();
+        }
+    }
+
+    let embedding_model_key = serde_yaml::Value::String("embedding_model".to_string());
+    if let Some(model) = rag
+        .get(&embedding_model_key)
+        .and_then(serde_yaml::Value::as_str)
+    {
+        let model = model.trim();
+        if !model.is_empty() {
+            settings.embedding_model = model.to_string();
+        }
+    }
+
+    settings
+}
+
+fn save_rag_ui_settings(path: &Path, settings: &RagUiSettings) -> Result<(), String> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|err| format!("Could not read settings file {}: {err}", path.display()))?;
+    let mut value: serde_yaml::Value = serde_yaml::from_str(&raw)
+        .map_err(|err| format!("Could not parse settings file {}: {err}", path.display()))?;
+
+    let root = value
+        .as_mapping_mut()
+        .ok_or_else(|| format!("Settings file {} is not a YAML mapping.", path.display()))?;
+    let rag_key = serde_yaml::Value::String("rag".to_string());
+    let rag_value = root
+        .entry(rag_key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let rag = rag_value.as_mapping_mut().ok_or_else(|| {
+        format!(
+            "The `rag` section in {} is not a YAML mapping.",
+            path.display()
+        )
+    })?;
+
+    rag.insert(
+        serde_yaml::Value::String("retrieval_mode".to_string()),
+        serde_yaml::Value::String(settings.retrieval_mode.as_str().to_string()),
+    );
+    rag.insert(
+        serde_yaml::Value::String("runtime_override".to_string()),
+        serde_yaml::Value::String(settings.runtime_override.as_str().to_string()),
+    );
+    rag.insert(
+        serde_yaml::Value::String("embedding_backend".to_string()),
+        serde_yaml::Value::String(settings.embedding_backend.clone()),
+    );
+    rag.insert(
+        serde_yaml::Value::String("embedding_model".to_string()),
+        serde_yaml::Value::String(settings.embedding_model.clone()),
+    );
+
+    let serialized = serde_yaml::to_string(&value).map_err(|err| {
+        format!(
+            "Could not serialize settings file {}: {err}",
+            path.display()
+        )
+    })?;
+    std::fs::write(path, serialized)
+        .map_err(|err| format!("Could not write settings file {}: {err}", path.display()))
+}
 
 pub struct AiPopupApp {
     config: Config,
@@ -377,6 +585,7 @@ pub struct AiPopupApp {
     settings_error: Option<String>,
     settings_notice: Option<String>,
     show_settings: bool,
+    rag_ui: RagUiSettings,
     pending_submission: Option<(String, String)>,
     last_submitted_request: Option<RequestFingerprint>,
     first_run_template: String,
@@ -393,8 +602,10 @@ pub struct AiPopupApp {
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
     async_available_models: AsyncAvailableModels,
     async_release_check: AsyncReleaseCheck,
+    async_rag_index: Arc<Mutex<Option<Result<String, String>>>>,
     release_check_state: ReleaseCheckState,
     last_completed_request: Option<RequestFingerprint>,
+    rag_index_in_progress: bool,
 }
 
 impl AiPopupApp {
@@ -433,6 +644,7 @@ impl AiPopupApp {
         let fallback_theme_name = config.theme.name.clone();
         let prompt_editor_height = default_prompt_editor_height(config.ui.window_height);
         let response_editor_height = default_response_editor_height(config.ui.window_height);
+        let rag_ui = default_rag_ui_settings(&config);
         let first_run_template = app_paths::discover_config_template_names()
             .ok()
             .and_then(|names| {
@@ -476,6 +688,7 @@ impl AiPopupApp {
             settings_error: None,
             settings_notice: None,
             show_settings: false,
+            rag_ui,
             pending_submission: None,
             last_submitted_request: None,
             first_run_template,
@@ -490,9 +703,12 @@ impl AiPopupApp {
             async_dictation: Arc::new(Mutex::new(None)),
             async_available_models: Arc::new(Mutex::new(Vec::new())),
             async_release_check: Arc::new(Mutex::new(None)),
+            async_rag_index: Arc::new(Mutex::new(None)),
             release_check_state: ReleaseCheckState::Checking,
             last_completed_request: None,
+            rag_index_in_progress: false,
         };
+        app.rag_ui = load_rag_ui_settings(&app.config, &app.rag_ui);
         app.start_release_check(&cc.egui_ctx);
         app
     }
@@ -614,16 +830,61 @@ impl AiPopupApp {
                 Err(error) => ReleaseCheckState::Error(error),
             };
         }
+
+        let rag_index = {
+            let mut rag_index_lock = self.async_rag_index.lock().unwrap();
+            rag_index_lock.take()
+        };
+        if let Some(result) = rag_index {
+            self.rag_index_in_progress = false;
+            match result {
+                Ok(message) => {
+                    self.settings_notice = Some(message);
+                    self.settings_error = None;
+                }
+                Err(error) => {
+                    self.settings_error = Some(error);
+                    self.settings_notice = None;
+                }
+            }
+        }
     }
 
     fn start_release_check(&mut self, ctx: &egui::Context) {
         self.release_check_state = ReleaseCheckState::Checking;
         let async_release_check = self.async_release_check.clone();
+        let include_beta = self.config.update.beta;
         let ctx = ctx.clone();
 
         self.runtime.spawn(async move {
-            let result = update::fetch_latest_release().await;
+            let result = update::fetch_latest_release(include_beta).await;
             *async_release_check.lock().unwrap() = Some(result);
+            ctx.request_repaint();
+        });
+    }
+
+    fn start_rag_index(&mut self, ctx: &egui::Context) {
+        if self.rag_index_in_progress {
+            return;
+        }
+        self.rag_index_in_progress = true;
+        self.settings_notice = Some(self.tr("settings.rag_indexing"));
+        self.settings_error = None;
+
+        let async_rag_index = self.async_rag_index.clone();
+        let config = self.config.clone();
+        let backend = self.selected_backend.clone();
+        let ctx = ctx.clone();
+
+        self.runtime.spawn(async move {
+            let rag = RagSystem::new(config.rag.clone());
+            let result = rag.index_documents(&backend, &config).await.map(|stats| {
+                format!(
+                    "RAG indexing completed: {} files, {} chunks (backend: {}).",
+                    stats.indexed_files, stats.indexed_chunks, backend
+                )
+            });
+            *async_rag_index.lock().unwrap() = Some(result.map_err(|err| err.to_string()));
             ctx.request_repaint();
         });
     }
@@ -651,7 +912,7 @@ impl AiPopupApp {
         self.is_loading = true;
         self.response = format!("⏳ Querying {}…", self.selected_backend);
 
-        let prompt = self.prompt.clone();
+        let prompt = self.rag_ui.runtime_override.apply_to_prompt(&self.prompt);
         let images = self.attachments.clone();
         let conversation = if self.session_chat_enabled {
             self.session_conversation.clone()
@@ -915,8 +1176,25 @@ impl AiPopupApp {
     fn persist_settings(&mut self) {
         match self.config.save() {
             Ok(()) => {
-                self.settings_notice = Some(self.tr("app.settings_save_ok"));
-                self.settings_error = None;
+                let Some(path) = self.config.loaded_from.clone() else {
+                    self.settings_notice = Some(self.tr("app.settings_save_ok"));
+                    self.settings_error = None;
+                    return;
+                };
+
+                match save_rag_ui_settings(&path, &self.rag_ui) {
+                    Ok(()) => {
+                        self.settings_notice = Some(self.tr("app.settings_save_ok"));
+                        self.settings_error = None;
+                    }
+                    Err(err) => {
+                        self.settings_error = Some(self.tr_with(
+                            "app.settings_save_error_with_path",
+                            &[("path", path.display().to_string()), ("error", err)],
+                        ));
+                        self.settings_notice = None;
+                    }
+                }
             }
             Err(err) => {
                 let save_path = self.config.loaded_from.clone().unwrap_or_else(|| {
@@ -1018,6 +1296,7 @@ impl AiPopupApp {
         match Config::load() {
             Ok(config) => {
                 self.config = config;
+                self.rag_ui = load_rag_ui_settings(&self.config, &self.rag_ui);
                 self.selected_backend = self.config.default_backend.clone();
                 self.prompt_profiles = PromptProfiles::load(&self.config)
                     .unwrap_or_else(|_| PromptProfiles::default_built_in());
@@ -2748,6 +3027,10 @@ fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
                 ui.add_space(12.0);
                 ui.separator();
                 ui.add_space(12.0);
+                render_rag_settings_section(app, ctx, ui);
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
                 render_history_debug_settings_section(app, ui);
                 ui.add_space(12.0);
                 ui.separator();
@@ -3009,6 +3292,21 @@ fn render_general_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui
         app.config.auto_read_selection = auto_read;
         app.persist_settings();
     }
+
+    ui.add_space(8.0);
+    let mut update_beta = app.config.update.beta;
+    if ui
+        .checkbox(&mut update_beta, app.tr("settings.update_beta_channel"))
+        .changed()
+    {
+        app.config.update.beta = update_beta;
+        app.persist_settings();
+        app.start_release_check(ctx);
+    }
+    ui.label(muted_label(
+        &app.tr("settings.update_beta_channel_hint"),
+        app.theme.weak_text_color,
+    ));
 }
 
 fn render_history_debug_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
@@ -3047,6 +3345,286 @@ fn render_history_debug_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui
         &app.tr("settings.debug_logging_warning"),
         app.theme.weak_text_color,
     ));
+}
+
+fn render_rag_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
+    egui::CollapsingHeader::new(
+        egui::RichText::new(app.tr("settings.rag"))
+            .color(app.theme.text_color)
+            .strong(),
+    )
+    .id_source("settings_rag")
+    .default_open(false)
+    .show(ui, |ui| {
+        let mut enabled = app.config.rag.enabled;
+        if ui
+            .checkbox(&mut enabled, app.tr("settings.rag_enabled"))
+            .changed()
+        {
+            app.config.rag.enabled = enabled;
+            app.persist_settings();
+        }
+
+        ui.add_space(8.0);
+        ui.label(muted_label(
+            &app.tr("settings.rag_retrieval_mode"),
+            app.theme.weak_text_color,
+        ));
+        let retrieval_mode_label = match app.rag_ui.retrieval_mode {
+            RagRetrievalMode::Keyword => app.tr("settings.rag_mode_keyword"),
+            RagRetrievalMode::Vector => app.tr("settings.rag_mode_vector"),
+            RagRetrievalMode::Hybrid => app.tr("settings.rag_mode_hybrid"),
+        };
+        let retrieval_mode_theme = app.theme.clone();
+        dropdown_box_scope(ui, &retrieval_mode_theme, |ui| {
+            egui::ComboBox::from_id_source("settings_rag_retrieval_mode")
+                .selected_text(dropdown_button_text(
+                    &retrieval_mode_label,
+                    &retrieval_mode_theme,
+                ))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    apply_dropdown_menu_style(ui, &retrieval_mode_theme);
+                    let options = [
+                        (RagRetrievalMode::Keyword, "settings.rag_mode_keyword"),
+                        (RagRetrievalMode::Vector, "settings.rag_mode_vector"),
+                        (RagRetrievalMode::Hybrid, "settings.rag_mode_hybrid"),
+                    ];
+                    for (mode, label_key) in options {
+                        if ui
+                            .selectable_label(
+                                app.rag_ui.retrieval_mode == mode,
+                                dropdown_item_text(&app.tr(label_key), &retrieval_mode_theme),
+                            )
+                            .clicked()
+                        {
+                            app.rag_ui.retrieval_mode = mode;
+                            app.persist_settings();
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(8.0);
+        ui.label(muted_label(
+            &app.tr("settings.rag_runtime_override"),
+            app.theme.weak_text_color,
+        ));
+        let runtime_override_label = match app.rag_ui.runtime_override {
+            RagRuntimeUiOverride::Default => app.tr("settings.rag_runtime_default"),
+            RagRuntimeUiOverride::ForceOn => app.tr("settings.rag_runtime_force_on"),
+            RagRuntimeUiOverride::ForceOff => app.tr("settings.rag_runtime_force_off"),
+        };
+        let runtime_override_theme = app.theme.clone();
+        dropdown_box_scope(ui, &runtime_override_theme, |ui| {
+            egui::ComboBox::from_id_source("settings_rag_runtime_override")
+                .selected_text(dropdown_button_text(
+                    &runtime_override_label,
+                    &runtime_override_theme,
+                ))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    apply_dropdown_menu_style(ui, &runtime_override_theme);
+                    let options = [
+                        (
+                            RagRuntimeUiOverride::Default,
+                            "settings.rag_runtime_default",
+                        ),
+                        (
+                            RagRuntimeUiOverride::ForceOn,
+                            "settings.rag_runtime_force_on",
+                        ),
+                        (
+                            RagRuntimeUiOverride::ForceOff,
+                            "settings.rag_runtime_force_off",
+                        ),
+                    ];
+                    for (mode, label_key) in options {
+                        if ui
+                            .selectable_label(
+                                app.rag_ui.runtime_override == mode,
+                                dropdown_item_text(&app.tr(label_key), &runtime_override_theme),
+                            )
+                            .clicked()
+                        {
+                            app.rag_ui.runtime_override = mode;
+                            app.persist_settings();
+                        }
+                    }
+                });
+        });
+
+        if app.rag_ui.retrieval_mode != RagRetrievalMode::Keyword {
+            ui.add_space(8.0);
+            ui.label(muted_label(
+                &app.tr("settings.rag_embedding_backend"),
+                app.theme.weak_text_color,
+            ));
+            let backend_theme = app.theme.clone();
+            dropdown_box_scope(ui, &backend_theme, |ui| {
+                egui::ComboBox::from_id_source("settings_rag_embedding_backend")
+                    .selected_text(dropdown_button_text(
+                        &app.rag_ui.embedding_backend,
+                        &backend_theme,
+                    ))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        apply_dropdown_menu_style(ui, &backend_theme);
+                        for backend in ["ollama", "chatgpt", "claude", "gemini"] {
+                            if ui
+                                .selectable_label(
+                                    app.rag_ui.embedding_backend == backend,
+                                    dropdown_item_text(backend, &backend_theme),
+                                )
+                                .clicked()
+                            {
+                                app.rag_ui.embedding_backend = backend.to_string();
+                                if app.rag_ui.embedding_model.trim().is_empty() {
+                                    app.rag_ui.embedding_model =
+                                        default_rag_embedding_model(&app.config, backend);
+                                }
+                                app.persist_settings();
+                            }
+                        }
+                    });
+            });
+
+            ui.add_space(8.0);
+            if settings_text_field(
+                ui,
+                &app.theme,
+                &app.tr("settings.rag_embedding_model"),
+                &mut app.rag_ui.embedding_model,
+                false,
+            ) {
+                app.persist_settings();
+            }
+        }
+
+        ui.add_space(8.0);
+        ui.label(muted_label(
+            &app.tr("settings.rag_documents_folder"),
+            app.theme.weak_text_color,
+        ));
+        ui.horizontal(|ui| {
+            let mut documents_folder = app
+                .config
+                .rag
+                .documents_folder
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut documents_folder)
+                        .hint_text(app.tr("settings.rag_documents_folder_hint")),
+                )
+                .changed()
+            {
+                let value = documents_folder.trim();
+                app.config.rag.documents_folder = if value.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(value))
+                };
+                app.persist_settings();
+            }
+
+            if ui.button(app.tr("settings.rag_browse")).clicked() {
+                let mut dialog = rfd::FileDialog::new();
+                if let Some(current) = &app.config.rag.documents_folder {
+                    dialog = dialog.set_directory(current);
+                }
+                if let Some(path) = dialog.pick_folder() {
+                    app.config.rag.documents_folder = Some(path);
+                    app.persist_settings();
+                }
+            }
+        });
+
+        ui.add_space(8.0);
+        ui.label(muted_label(
+            &app.tr("settings.rag_vector_db_path"),
+            app.theme.weak_text_color,
+        ));
+        let mut vector_db_path = app.config.rag.vector_db_path.to_string_lossy().to_string();
+        if ui
+            .add(egui::TextEdit::singleline(&mut vector_db_path))
+            .changed()
+        {
+            let value = vector_db_path.trim();
+            if !value.is_empty() {
+                app.config.rag.vector_db_path = PathBuf::from(value);
+                app.persist_settings();
+            }
+        }
+
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new(
+            egui::RichText::new(app.tr("settings.rag_advanced"))
+                .color(app.theme.text_color)
+                .strong(),
+        )
+        .id_source("settings_rag_advanced")
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(muted_label(
+                    &app.tr("settings.rag_chunk_size"),
+                    app.theme.weak_text_color,
+                ));
+                let mut chunk_size = app.config.rag.chunk_size as u64;
+                if ui
+                    .add(egui::DragValue::new(&mut chunk_size).clamp_range(128..=20_000))
+                    .changed()
+                {
+                    app.config.rag.chunk_size = chunk_size as usize;
+                    app.persist_settings();
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(muted_label(
+                    &app.tr("settings.rag_top_n"),
+                    app.theme.weak_text_color,
+                ));
+                let mut top_n = app.config.rag.max_retrieved_docs as u64;
+                if ui
+                    .add(egui::DragValue::new(&mut top_n).clamp_range(1..=20))
+                    .changed()
+                {
+                    app.config.rag.max_retrieved_docs = top_n as usize;
+                    app.persist_settings();
+                }
+            });
+        });
+
+        ui.add_space(8.0);
+        let can_index = app.config.rag.documents_folder.is_some();
+        let index_button = ui.add_enabled(
+            can_index && !app.rag_index_in_progress,
+            egui::Button::new(app.tr("settings.rag_index_now")),
+        );
+        if index_button.clicked() {
+            app.start_rag_index(ctx);
+        }
+        if app.rag_index_in_progress {
+            ui.label(muted_label(
+                &app.tr("settings.rag_indexing"),
+                app.theme.weak_text_color,
+            ));
+        } else if !can_index {
+            ui.label(muted_label(
+                &app.tr("settings.rag_index_disabled_hint"),
+                app.theme.weak_text_color,
+            ));
+        }
+
+        ui.label(muted_label(
+            &app.tr("settings.rag_runtime_hint"),
+            app.theme.weak_text_color,
+        ));
+    });
 }
 
 fn render_provider_settings_sections(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {

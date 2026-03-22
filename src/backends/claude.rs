@@ -101,3 +101,91 @@ pub(crate) fn claude_response_text(result: &serde_json::Value) -> Result<String>
 
     Ok(content.to_string())
 }
+
+pub async fn embed(text: &str, config: &Config) -> Result<Vec<f32>> {
+    embed_with_model(text, config, None).await
+}
+
+pub async fn embed_with_model(
+    text: &str,
+    config: &Config,
+    model_override: Option<&str>,
+) -> Result<Vec<f32>> {
+    let (api_key, model) = config
+        .claude
+        .as_ref()
+        .map(|cfg| (cfg.api_key.clone(), cfg.model.clone()))
+        .ok_or_else(|| anyhow!("⚠️ Claude config section not found in config.yaml."))?;
+
+    let preferred_model = model_override.unwrap_or(&model);
+
+    match embed_at(
+        "https://api.anthropic.com/v1/embeddings",
+        preferred_model,
+        text,
+        &api_key,
+    )
+    .await
+    {
+        Ok(embedding) => Ok(embedding),
+        Err(_) if preferred_model != "claude-embedding-1" => {
+            embed_at(
+                "https://api.anthropic.com/v1/embeddings",
+                "claude-embedding-1",
+                text,
+                &api_key,
+            )
+            .await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub(crate) async fn embed_at(
+    url: &str,
+    model: &str,
+    text: &str,
+    api_key: &str,
+) -> Result<Vec<f32>> {
+    if api_key.is_empty() || api_key == "YOUR_ANTHROPIC_API_KEY" {
+        return Err(anyhow!(
+            "⚠️ Anthropic API key not configured. Edit config.yaml and set claude.api_key."
+        ));
+    }
+
+    let payload = json!({
+        "model": model,
+        "input": text,
+        "input_type": "search_document"
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+    let response = client
+        .post(url)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .json(&payload)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(claude_error_message(status, &text, model)));
+    }
+
+    let result: serde_json::Value = response.json().await?;
+    let embedding = result["embedding"]
+        .as_array()
+        .ok_or_else(|| anyhow!("Unexpected Claude embeddings API response structure"))?
+        .iter()
+        .filter_map(|v| v.as_f64())
+        .map(|v| v as f32)
+        .collect::<Vec<_>>();
+    if embedding.is_empty() {
+        return Err(anyhow!("Claude embeddings API returned an empty vector"));
+    }
+    Ok(embedding)
+}
