@@ -39,6 +39,13 @@ pub enum RagRuntimeOverride {
 pub struct IndexStats {
     pub indexed_files: usize,
     pub indexed_chunks: usize,
+    pub total_lines: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RagCorpusStats {
+    pub file_count: usize,
+    pub total_lines: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +109,7 @@ impl RagSystem {
         Ok(IndexStats {
             indexed_files: prepared.indexed_files,
             indexed_chunks: prepared.indexed_chunks,
+            total_lines: prepared.total_lines,
         })
     }
 
@@ -332,6 +340,7 @@ impl RagSystem {
         let store_keyword_index = matches!(mode, RetrievalMode::Keyword | RetrievalMode::Hybrid);
         let mut indexed_files = 0usize;
         let mut indexed_chunks = 0usize;
+        let mut total_lines = 0usize;
         let mut chunks = Vec::new();
 
         for entry in WalkDir::new(docs_folder)
@@ -356,6 +365,8 @@ impl RagSystem {
             }
 
             indexed_files += 1;
+            total_lines = total_lines
+                .saturating_add(text.lines().filter(|line| !line.trim().is_empty()).count());
             for (chunk_index, chunk_text) in file_chunks.into_iter().enumerate() {
                 let embedding = if store_embeddings {
                     Some(
@@ -379,6 +390,7 @@ impl RagSystem {
         Ok(PendingIndexData {
             indexed_files,
             indexed_chunks,
+            total_lines,
             store_keyword_index,
             chunks,
         })
@@ -493,6 +505,7 @@ struct PendingChunk {
 struct PendingIndexData {
     indexed_files: usize,
     indexed_chunks: usize,
+    total_lines: usize,
     store_keyword_index: bool,
     chunks: Vec<PendingChunk>,
 }

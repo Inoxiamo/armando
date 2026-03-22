@@ -15,7 +15,7 @@ use crate::config::{Config, RagRuntimeOverride};
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
 use crate::prompt_profiles::PromptProfiles;
-use crate::rag::RagSystem;
+use crate::rag::{IndexStats, RagCorpusStats, RagSystem};
 use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
 use crate::update::{self, ReleaseInfo};
 use crate::window_context;
@@ -446,10 +446,11 @@ pub struct AiPopupApp {
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
     async_available_models: AsyncAvailableModels,
     async_release_check: AsyncReleaseCheck,
-    async_rag_index: Arc<Mutex<Option<Result<String, String>>>>,
+    async_rag_index: Arc<Mutex<Option<Result<IndexStats, String>>>>,
     release_check_state: ReleaseCheckState,
     last_completed_request: Option<RequestFingerprint>,
     rag_index_in_progress: bool,
+    rag_corpus_stats: Option<RagCorpusStats>,
 }
 
 impl AiPopupApp {
@@ -550,6 +551,7 @@ impl AiPopupApp {
             release_check_state: ReleaseCheckState::Checking,
             last_completed_request: None,
             rag_index_in_progress: false,
+            rag_corpus_stats: None,
         };
         app.start_release_check(&cc.egui_ctx);
         app
@@ -680,8 +682,18 @@ impl AiPopupApp {
         if let Some(result) = rag_index {
             self.rag_index_in_progress = false;
             match result {
-                Ok(message) => {
-                    self.settings_notice = Some(message);
+                Ok(stats) => {
+                    self.rag_corpus_stats = Some(RagCorpusStats {
+                        file_count: stats.indexed_files,
+                        total_lines: stats.total_lines,
+                    });
+                    self.settings_notice = Some(format!(
+                        "RAG indexing completed: {} files, {} chunks, {} lines (backend: {}).",
+                        stats.indexed_files,
+                        stats.indexed_chunks,
+                        stats.total_lines,
+                        self.selected_backend
+                    ));
                     self.settings_error = None;
                 }
                 Err(error) => {
@@ -720,12 +732,7 @@ impl AiPopupApp {
 
         self.runtime.spawn(async move {
             let rag = RagSystem::new(config.rag.clone());
-            let result = rag.index_documents(&backend, &config).await.map(|stats| {
-                format!(
-                    "RAG indexing completed: {} files, {} chunks (backend: {}).",
-                    stats.indexed_files, stats.indexed_chunks, backend
-                )
-            });
+            let result = rag.index_documents(&backend, &config).await;
             *async_rag_index.lock().unwrap() = Some(result.map_err(|err| err.to_string()));
             ctx.request_repaint();
         });
@@ -2397,7 +2404,7 @@ fn render_general_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui
             .strong(),
     )
     .id_source("settings_general")
-    .default_open(true)
+    .default_open(false)
     .show(ui, |ui| {
         ui.label(muted_label(
             &app.tr("settings.language"),

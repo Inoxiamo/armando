@@ -1,4 +1,5 @@
 use crate::config::{RagMode, RagRuntimeOverride};
+use crate::rag::RagCorpusStats;
 use std::path::PathBuf;
 
 use super::{
@@ -115,6 +116,73 @@ pub(super) fn render_rag_settings_section(
         if app.config.rag.mode != RagMode::Keyword {
             ui.add_space(8.0);
             ui.label(muted_label(
+                &app.tr("settings.rag_tuning_preset"),
+                app.theme.weak_text_color,
+            ));
+            if let Some(stats) = &app.rag_corpus_stats {
+                ui.label(muted_label(
+                    &app.tr_with(
+                        "settings.rag_corpus_summary",
+                        &[
+                            ("files", stats.file_count.to_string()),
+                            ("lines", stats.total_lines.to_string()),
+                        ],
+                    ),
+                    app.theme.weak_text_color,
+                ));
+            } else {
+                ui.label(muted_label(
+                    &app.tr("settings.rag_preset_from_index_hint"),
+                    app.theme.weak_text_color,
+                ));
+            }
+            let active_mode = app.config.rag.mode;
+            let inferred_preset = detect_selected_preset(
+                active_mode,
+                app.config.rag.chunk_size,
+                app.config.rag.max_retrieved_docs,
+                app.rag_corpus_stats.as_ref(),
+            );
+            let preset_theme = app.theme.clone();
+            dropdown_box_scope(ui, &preset_theme, |ui| {
+                egui::ComboBox::from_id_source("settings_rag_tuning_preset")
+                    .selected_text(dropdown_button_text(
+                        &app.tr(inferred_preset.label_key()),
+                        &preset_theme,
+                    ))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        apply_dropdown_menu_style(ui, &preset_theme);
+                        for preset in [
+                            RagTuningPreset::Compact,
+                            RagTuningPreset::Balanced,
+                            RagTuningPreset::Deep,
+                            RagTuningPreset::Custom,
+                        ] {
+                            if ui
+                                .selectable_label(
+                                    inferred_preset == preset,
+                                    dropdown_item_text(&app.tr(preset.label_key()), &preset_theme),
+                                )
+                                .clicked()
+                            {
+                                if preset != RagTuningPreset::Custom {
+                                    let (chunk_size, top_n) = preset_values_for_mode(
+                                        preset,
+                                        active_mode,
+                                        app.rag_corpus_stats.as_ref(),
+                                    );
+                                    app.config.rag.chunk_size = chunk_size;
+                                    app.config.rag.max_retrieved_docs = top_n;
+                                    app.persist_settings();
+                                }
+                            }
+                        }
+                    });
+            });
+
+            ui.add_space(8.0);
+            ui.label(muted_label(
                 &app.tr("settings.rag_embedding_backend"),
                 app.theme.weak_text_color,
             ));
@@ -199,6 +267,7 @@ pub(super) fn render_rag_settings_section(
                 } else {
                     Some(PathBuf::from(value))
                 };
+                app.rag_corpus_stats = None;
                 app.persist_settings();
             }
 
@@ -209,6 +278,7 @@ pub(super) fn render_rag_settings_section(
                 }
                 if let Some(path) = dialog.pick_folder() {
                     app.config.rag.documents_folder = Some(path);
+                    app.rag_corpus_stats = None;
                     app.persist_settings();
                 }
             }
@@ -297,4 +367,86 @@ pub(super) fn render_rag_settings_section(
             app.theme.weak_text_color,
         ));
     });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RagTuningPreset {
+    Compact,
+    Balanced,
+    Deep,
+    Custom,
+}
+
+impl RagTuningPreset {
+    fn label_key(self) -> &'static str {
+        match self {
+            RagTuningPreset::Compact => "settings.rag_preset_compact",
+            RagTuningPreset::Balanced => "settings.rag_preset_balanced",
+            RagTuningPreset::Deep => "settings.rag_preset_deep",
+            RagTuningPreset::Custom => "settings.rag_preset_custom",
+        }
+    }
+}
+
+fn detect_selected_preset(
+    mode: RagMode,
+    chunk_size: usize,
+    top_n: usize,
+    stats: Option<&RagCorpusStats>,
+) -> RagTuningPreset {
+    for preset in [
+        RagTuningPreset::Compact,
+        RagTuningPreset::Balanced,
+        RagTuningPreset::Deep,
+    ] {
+        let (preset_chunk, preset_top_n) = preset_values_for_mode(preset, mode, stats);
+        if preset_chunk == chunk_size && preset_top_n == top_n {
+            return preset;
+        }
+    }
+    RagTuningPreset::Custom
+}
+
+fn preset_values_for_mode(
+    preset: RagTuningPreset,
+    mode: RagMode,
+    stats: Option<&RagCorpusStats>,
+) -> (usize, usize) {
+    let default_stats = RagCorpusStats::default();
+    let stats = stats.unwrap_or(&default_stats);
+    let files = stats.file_count.max(1);
+    let lines = stats.total_lines.max(files);
+    let avg_lines_per_file = lines / files;
+
+    let line_bucket = match lines {
+        0..=5_000 => 0usize,
+        5_001..=25_000 => 1usize,
+        25_001..=100_000 => 2usize,
+        _ => 3usize,
+    };
+    let file_bucket = match files {
+        0..=10 => 0usize,
+        11..=40 => 1usize,
+        41..=120 => 2usize,
+        _ => 3usize,
+    };
+
+    let (base_chunk, base_top_n) = match preset {
+        RagTuningPreset::Compact => (700usize, 3usize),
+        RagTuningPreset::Balanced => (1_150usize, 5usize),
+        RagTuningPreset::Deep => (1_600usize, 7usize),
+        RagTuningPreset::Custom => (1_200usize, 4usize),
+    };
+
+    let avg_adjustment = (avg_lines_per_file / 40).min(320);
+    let mut chunk_size =
+        base_chunk + (line_bucket * 150) + avg_adjustment - (file_bucket.saturating_mul(40));
+    let mut top_n = base_top_n + line_bucket + usize::from(file_bucket >= 2);
+
+    if mode == RagMode::Hybrid {
+        chunk_size = chunk_size.saturating_sub(100);
+        top_n = top_n.saturating_sub(1).max(2);
+    }
+
+    (chunk_size.clamp(256, 4_000), top_n.clamp(1, 20))
 }

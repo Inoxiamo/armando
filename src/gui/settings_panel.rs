@@ -75,17 +75,17 @@ pub(super) fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, u
 }
 
 fn settings_section_break(ui: &mut egui::Ui, color: egui::Color32) {
-    ui.add_space(2.0);
+    ui.add_space(1.0);
     let width = ui.available_width().max(12.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 2.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover());
     let y = rect.center().y;
-    let x_padding = 8.0;
+    let x_padding = 6.0;
     ui.painter().line_segment(
         [
             egui::pos2(rect.left() + x_padding, y),
             egui::pos2(rect.right() - x_padding, y),
         ],
-        egui::Stroke::new(1.0, color.gamma_multiply(0.35)),
+        egui::Stroke::new(1.0, color.gamma_multiply(0.48)),
     );
-    ui.add_space(2.0);
+    ui.add_space(1.0);
 }
