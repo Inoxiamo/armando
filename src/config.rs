@@ -173,7 +173,7 @@ fn default_auto_read_selection() -> bool {
 }
 
 fn default_backend() -> String {
-    "ollama".to_string()
+    "gemini".to_string()
 }
 
 fn default_theme_name() -> String {
@@ -296,6 +296,12 @@ fn first_env(keys: &[&str]) -> Option<String> {
         .find_map(|key| std::env::var(key).ok())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+        .filter(|value| !is_placeholder_env_value(value))
+}
+
+fn is_placeholder_env_value(value: &str) -> bool {
+    let normalized = value.trim().trim_matches('"').to_ascii_uppercase();
+    normalized.starts_with("YOUR_")
 }
 
 fn apply_env_overrides(config: &mut Config) {
@@ -360,7 +366,7 @@ mod tests {
         let yaml = "{}";
         let config: Config = serde_yaml::from_str(yaml).unwrap();
 
-        assert_eq!(config.default_backend, "ollama");
+        assert_eq!(config.default_backend, "gemini");
         assert!(config.auto_read_selection);
         assert_eq!(config.theme.name, "default-dark");
         assert_eq!(config.ui.language, "en");
@@ -429,6 +435,47 @@ rag:
         assert_eq!(
             config.claude.as_ref().map(|cfg| cfg.api_key.as_str()),
             Some("from-env-claude")
+        );
+
+        std::env::remove_var("ARMANDO_OPENAI_API_KEY");
+        std::env::remove_var("ARMANDO_GEMINI_API_KEY");
+        std::env::remove_var("ARMANDO_ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn env_overrides_ignore_placeholder_values() {
+        let _guard = env_lock();
+        std::env::set_var("ARMANDO_OPENAI_API_KEY", "YOUR_OPENAI_API_KEY");
+        std::env::set_var("ARMANDO_GEMINI_API_KEY", "YOUR_GEMINI_API_KEY");
+        std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "YOUR_ANTHROPIC_API_KEY");
+
+        let mut config = Config::default();
+        config.chatgpt = Some(ChatGptConfig {
+            api_key: "keep-openai".to_string(),
+            model: "gpt-4o-mini".to_string(),
+        });
+        config.gemini = Some(GeminiConfig {
+            api_key: "keep-gemini".to_string(),
+            model: "gemini-1.5-flash".to_string(),
+        });
+        config.claude = Some(ClaudeConfig {
+            api_key: "keep-claude".to_string(),
+            model: "claude-3-5-sonnet-latest".to_string(),
+        });
+
+        apply_env_overrides(&mut config);
+
+        assert_eq!(
+            config.chatgpt.as_ref().map(|value| value.api_key.as_str()),
+            Some("keep-openai")
+        );
+        assert_eq!(
+            config.gemini.as_ref().map(|value| value.api_key.as_str()),
+            Some("keep-gemini")
+        );
+        assert_eq!(
+            config.claude.as_ref().map(|value| value.api_key.as_str()),
+            Some("keep-claude")
         );
 
         std::env::remove_var("ARMANDO_OPENAI_API_KEY");

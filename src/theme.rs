@@ -205,7 +205,7 @@ danger_color: \"#A1A2A3\"\n",
         let config = Config {
             aliases: None,
             auto_read_selection: true,
-            default_backend: "ollama".to_string(),
+            default_backend: "gemini".to_string(),
             theme: ThemeConfig {
                 name: "ignored".to_string(),
                 path: Some(theme_path.clone()),

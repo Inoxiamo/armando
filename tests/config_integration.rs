@@ -76,7 +76,7 @@ fn config_load_falls_back_to_built_in_defaults_when_config_is_missing() {
 
     let config = Config::load().unwrap();
     assert_eq!(config.loaded_from, None);
-    assert_eq!(config.default_backend, "ollama");
+    assert_eq!(config.default_backend, "gemini");
     assert!(config.auto_read_selection);
     assert_eq!(config.theme.name, "default-dark");
     assert_eq!(config.ui.language, "en");

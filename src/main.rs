@@ -53,12 +53,83 @@ fn run_ui(
         ..Default::default()
     };
 
-    eframe::run_native(
-        "armando",
+    run_native_with_display_fallback("armando", options, cfg, prompt_profiles, theme, rt)
+}
+
+fn run_native_with_display_fallback(
+    title: &str,
+    options: eframe::NativeOptions,
+    cfg: config::Config,
+    prompt_profiles: prompt_profiles::PromptProfiles,
+    theme: theme::ResolvedTheme,
+    rt: Arc<Runtime>,
+) -> anyhow::Result<()> {
+    match eframe::run_native(
+        title,
         options,
         Box::new(move |cc| Box::new(gui::AiPopupApp::new(cc, cfg, prompt_profiles, theme, rt))),
-    )
-    .map_err(|e| anyhow::anyhow!("eframe error: {e:?}"))
+    ) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            #[cfg(target_os = "linux")]
+            {
+                let message = format!("{err:?}");
+                let has_no_compositor = message.contains("WaylandError(Connection(NoCompositor))");
+                let x11_backend_forced = std::env::var("WINIT_UNIX_BACKEND")
+                    .map(|value| value.eq_ignore_ascii_case("x11"))
+                    .unwrap_or(false);
+                let has_x11_display = std::env::var("DISPLAY")
+                    .map(|value| !value.trim().is_empty())
+                    .unwrap_or(false);
+
+                if has_no_compositor && !x11_backend_forced && has_x11_display {
+                    log::warn!(
+                        "Wayland compositor unavailable, retrying startup with WINIT_UNIX_BACKEND=x11"
+                    );
+                    std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+
+                    let retry_cfg = config::Config::load()?;
+                    let retry_profiles = prompt_profiles::PromptProfiles::load(&retry_cfg)?;
+                    let retry_theme = load_theme(&retry_cfg)?;
+                    let retry_rt = Arc::new(Runtime::new()?);
+                    let retry_options = eframe::NativeOptions {
+                        viewport: egui::ViewportBuilder::default()
+                            .with_inner_size([
+                                980.0,
+                                retry_cfg.ui.window_height.clamp(500.0, 620.0),
+                            ])
+                            .with_min_inner_size([820.0, 500.0])
+                            .with_app_id("armando")
+                            .with_always_on_top()
+                            .with_resizable(true)
+                            .with_decorations(true)
+                            .with_title("armando")
+                            .with_icon(build_app_icon()),
+                        follow_system_theme: false,
+                        default_theme: Theme::Dark,
+                        ..Default::default()
+                    };
+
+                    return eframe::run_native(
+                        title,
+                        retry_options,
+                        Box::new(move |cc| {
+                            Box::new(gui::AiPopupApp::new(
+                                cc,
+                                retry_cfg,
+                                retry_profiles,
+                                retry_theme,
+                                retry_rt,
+                            ))
+                        }),
+                    )
+                    .map_err(|retry_err| anyhow::anyhow!("eframe error: {retry_err:?}"));
+                }
+            }
+
+            Err(anyhow::anyhow!("eframe error: {err:?}"))
+        }
+    }
 }
 
 fn build_app_icon() -> egui::IconData {

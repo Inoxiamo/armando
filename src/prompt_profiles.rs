@@ -358,7 +358,7 @@ mod tests {
                 "Trasforma il testo in un titolo breve.".to_string(),
             )])),
             auto_read_selection: true,
-            default_backend: "ollama".to_string(),
+            default_backend: "gemini".to_string(),
             theme: ThemeConfig::default(),
             ui: UiConfig::default(),
             history: HistoryConfig::default(),

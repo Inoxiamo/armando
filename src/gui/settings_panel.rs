@@ -40,13 +40,13 @@ pub(super) fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, u
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 super::render_general_settings_section(app, ctx, ui);
-                settings_section_break(ui);
+                settings_section_break(ui, app.theme.border_color);
                 super::render_provider_settings_sections(app, ctx, ui);
-                settings_section_break(ui);
+                settings_section_break(ui, app.theme.border_color);
                 super::render_startup_settings_section(app, ui);
-                settings_section_break(ui);
+                settings_section_break(ui, app.theme.border_color);
                 super::render_history_debug_settings_section(app, ui);
-                settings_section_break(ui);
+                settings_section_break(ui, app.theme.border_color);
                 super::render_rag_settings_section(app, ctx, ui);
 
                 ui.add_space(10.0);
@@ -74,8 +74,18 @@ pub(super) fn render_settings_panel(app: &mut AiPopupApp, ctx: &egui::Context, u
     });
 }
 
-fn settings_section_break(ui: &mut egui::Ui) {
-    ui.add_space(5.0);
-    ui.separator();
-    ui.add_space(5.0);
+fn settings_section_break(ui: &mut egui::Ui, color: egui::Color32) {
+    ui.add_space(2.0);
+    let width = ui.available_width().max(12.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 2.0), egui::Sense::hover());
+    let y = rect.center().y;
+    let x_padding = 8.0;
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left() + x_padding, y),
+            egui::pos2(rect.right() - x_padding, y),
+        ],
+        egui::Stroke::new(1.0, color.gamma_multiply(0.35)),
+    );
+    ui.add_space(2.0);
 }

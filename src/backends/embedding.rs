@@ -30,7 +30,7 @@ pub async fn embed_text_with_model(
 }
 
 fn resolve_embedding_request<'a>(
-    _backend: &'a str,
+    backend: &'a str,
     config: &'a Config,
 ) -> (&'a str, Option<&'a str>) {
     let embedding_backend = config
@@ -38,7 +38,23 @@ fn resolve_embedding_request<'a>(
         .embedding_backend
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or("ollama");
+        .or_else(|| {
+            let selected = backend.trim();
+            if selected.is_empty() {
+                None
+            } else {
+                Some(selected)
+            }
+        })
+        .or_else(|| {
+            let configured = config.default_backend.trim();
+            if configured.is_empty() {
+                None
+            } else {
+                Some(configured)
+            }
+        })
+        .unwrap_or("gemini");
     let embedding_model = config
         .rag
         .embedding_model
@@ -63,7 +79,7 @@ mod tests {
                 "Trasforma il testo in un titolo breve.".to_string(),
             )])),
             auto_read_selection: true,
-            default_backend: "ollama".to_string(),
+            default_backend: "gemini".to_string(),
             theme: ThemeConfig::default(),
             ui: UiConfig::default(),
             history: HistoryConfig::default(),
@@ -94,12 +110,12 @@ mod tests {
     }
 
     #[test]
-    fn embedding_request_falls_back_to_ollama_when_overrides_are_missing() {
+    fn embedding_request_falls_back_to_selected_backend_when_overrides_are_missing() {
         let config = test_config();
 
         let (backend, model) = resolve_embedding_request("gemini", &config);
 
-        assert_eq!(backend, "ollama");
+        assert_eq!(backend, "gemini");
         assert_eq!(model, None);
     }
 }

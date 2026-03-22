@@ -375,7 +375,15 @@ fn rag_embedding_backend(config: &Config) -> String {
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| "ollama".to_string())
+        .or_else(|| {
+            let configured = config.default_backend.trim();
+            if configured.is_empty() {
+                None
+            } else {
+                Some(configured.to_string())
+            }
+        })
+        .unwrap_or_else(|| "gemini".to_string())
 }
 
 fn rag_embedding_model(config: &Config, backend: &str) -> String {
