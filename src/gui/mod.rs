@@ -11,7 +11,7 @@ use crate::backends::PromptMode;
 use crate::backends::ResponseProgress;
 use crate::backends::ResponseProgressSink;
 use crate::backends::{ConversationTurn, ImageAttachment, QueryInput};
-use crate::config::{Config, RagRuntimeOverride};
+use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
 use crate::prompt_profiles::PromptProfiles;
@@ -42,57 +42,57 @@ fn load_toolbar_icon_textures(ctx: &egui::Context) -> HashMap<ToolbarIcon, egui:
         (
             ToolbarIcon::Settings,
             "toolbar_settings",
-            IconTextureSource::Png(include_bytes!("../assets/icons/settings.png")),
+            IconTextureSource::Png(include_bytes!("../../assets/icons/settings.png")),
         ),
         (
             ToolbarIcon::Send,
             "toolbar_send",
-            IconTextureSource::Png(include_bytes!("../assets/icons/send.png")),
+            IconTextureSource::Png(include_bytes!("../../assets/icons/send.png")),
         ),
         (
             ToolbarIcon::Clear,
             "toolbar_clear",
-            IconTextureSource::Svg(include_str!("../assets/icons/close.svg")),
+            IconTextureSource::Svg(include_str!("../../assets/icons/close.svg")),
         ),
         (
             ToolbarIcon::Mic,
             "toolbar_mic",
-            IconTextureSource::Png(include_bytes!("../assets/icons/mic.png")),
+            IconTextureSource::Png(include_bytes!("../../assets/icons/mic.png")),
         ),
         (
             ToolbarIcon::Stop,
             "toolbar_stop",
-            IconTextureSource::Svg(include_str!("../assets/icons/stop.svg")),
+            IconTextureSource::Svg(include_str!("../../assets/icons/stop.svg")),
         ),
         (
             ToolbarIcon::PasteImage,
             "toolbar_paste_image",
-            IconTextureSource::Png(include_bytes!("../assets/icons/screenshot.png")),
+            IconTextureSource::Png(include_bytes!("../../assets/icons/screenshot.png")),
         ),
         (
             ToolbarIcon::AttachImage,
             "toolbar_attach_image",
-            IconTextureSource::Png(include_bytes!("../assets/icons/attach-image.png")),
+            IconTextureSource::Png(include_bytes!("../../assets/icons/attach-image.png")),
         ),
         (
             ToolbarIcon::History,
             "toolbar_history",
-            IconTextureSource::Svg(include_str!("../assets/icons/history.svg")),
+            IconTextureSource::Svg(include_str!("../../assets/icons/history.svg")),
         ),
         (
             ToolbarIcon::HistoryOpen,
             "toolbar_history_open",
-            IconTextureSource::Svg(include_str!("../assets/icons/history-open.svg")),
+            IconTextureSource::Svg(include_str!("../../assets/icons/history-open.svg")),
         ),
         (
             ToolbarIcon::Copy,
             "toolbar_copy",
-            IconTextureSource::Svg(include_str!("../assets/icons/copy.svg")),
+            IconTextureSource::Svg(include_str!("../../assets/icons/copy.svg")),
         ),
         (
             ToolbarIcon::Close,
             "toolbar_close",
-            IconTextureSource::Svg(include_str!("../assets/icons/close.svg")),
+            IconTextureSource::Svg(include_str!("../../assets/icons/close.svg")),
         ),
     ] {
         let rendered = match source {
@@ -360,14 +360,6 @@ fn default_rag_embedding_model(config: &Config, backend: &str) -> String {
     }
 }
 
-fn apply_rag_runtime_override(mode: RagRuntimeOverride, prompt: &str) -> String {
-    match mode {
-        RagRuntimeOverride::Default => prompt.to_string(),
-        RagRuntimeOverride::ForceOn => format!("!rag on {prompt}"),
-        RagRuntimeOverride::ForceOff => format!("!rag off {prompt}"),
-    }
-}
-
 fn rag_embedding_backend(config: &Config) -> String {
     config
         .rag
@@ -394,6 +386,21 @@ fn rag_embedding_model(config: &Config, backend: &str) -> String {
         .filter(|value| !value.trim().is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| default_rag_embedding_model(config, backend))
+}
+
+fn resolve_rag_vector_db_path(config: &Config) -> PathBuf {
+    let path = &config.rag.vector_db_path;
+    if path.is_absolute() {
+        path.clone()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
+fn rag_toggle_available(config: &Config) -> bool {
+    resolve_rag_vector_db_path(config).is_file()
 }
 
 pub struct AiPopupApp {
@@ -761,7 +768,7 @@ impl AiPopupApp {
         self.is_loading = true;
         self.response = format!("⏳ Querying {}…", self.selected_backend);
 
-        let prompt = apply_rag_runtime_override(self.config.rag.runtime_override, &self.prompt);
+        let prompt = self.prompt.clone();
         let images = self.attachments.clone();
         let conversation = if self.session_chat_enabled {
             self.session_conversation.clone()
@@ -1492,6 +1499,28 @@ fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egu
 
     ui.horizontal(|ui| {
         ui.label(section_label(&prompt_section_label, app.theme.text_color));
+        ui.add_space(8.0);
+        let can_toggle_rag = rag_toggle_available(&app.config);
+        let rag_button = ui
+            .add_enabled(
+                can_toggle_rag,
+                egui::Button::new(egui::RichText::new("RAG").strong())
+                    .fill(if app.config.rag.enabled {
+                        app.theme.accent_color
+                    } else {
+                        app.theme.panel_fill_soft
+                    })
+                    .stroke(egui::Stroke::new(1.0, app.theme.border_color)),
+            )
+            .on_hover_text(if can_toggle_rag {
+                "Toggle RAG"
+            } else {
+                "RAG requires an existing SQLite DB file"
+            });
+        if rag_button.clicked() {
+            app.config.rag.enabled = !app.config.rag.enabled;
+            app.persist_settings();
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(layout::section_actions_right_inset());
             let send_clicked = ui

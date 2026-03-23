@@ -19,7 +19,7 @@ pub struct I18n {
 
 impl I18n {
     pub fn load(code: &str) -> anyhow::Result<Self> {
-        let fallback = load_locale_file("en")?;
+        let fallback = load_builtin_locale("en")?;
         let locale = if code == "en" {
             fallback.clone()
         } else {
@@ -49,9 +49,18 @@ impl I18n {
 
 pub fn available_locales() -> anyhow::Result<Vec<LocaleDefinition>> {
     let mut locales = Vec::new();
+    locales.extend(load_builtin_locales()?);
+
     for code in app_paths::discover_named_files("locales", "yaml")? {
         if let Ok(locale) = load_locale_file(&code) {
-            locales.push(locale);
+            if let Some(existing) = locales
+                .iter_mut()
+                .find(|current| current.code == locale.code)
+            {
+                *existing = locale;
+            } else {
+                locales.push(locale);
+            }
         }
     }
     locales.sort_by(|a, b| a.name.cmp(&b.name));
@@ -67,5 +76,20 @@ fn load_locale_file(code: &str) -> anyhow::Result<LocaleDefinition> {
         }
     }
 
-    anyhow::bail!("Locale '{code}' not found.")
+    load_builtin_locale(code)
+}
+
+fn load_builtin_locales() -> anyhow::Result<Vec<LocaleDefinition>> {
+    Ok(vec![load_builtin_locale("en")?, load_builtin_locale("it")?])
+}
+
+fn load_builtin_locale(code: &str) -> anyhow::Result<LocaleDefinition> {
+    let raw = match code {
+        "en" => include_str!("../../locales/en.yaml"),
+        "it" => include_str!("../../locales/it.yaml"),
+        _ => anyhow::bail!("Locale '{code}' not found."),
+    };
+
+    let locale: LocaleDefinition = serde_yaml::from_str(raw)?;
+    Ok(locale)
 }

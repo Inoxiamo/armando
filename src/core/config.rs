@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::app_paths;
@@ -37,23 +38,12 @@ pub enum RagMode {
     Hybrid,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RagRuntimeOverride {
-    #[default]
-    Default,
-    ForceOn,
-    ForceOff,
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RagConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub mode: RagMode,
-    #[serde(default)]
-    pub runtime_override: RagRuntimeOverride,
     pub documents_folder: Option<PathBuf>,
     #[serde(default = "default_rag_vector_db_path")]
     pub vector_db_path: PathBuf,
@@ -151,6 +141,8 @@ pub struct Config {
     pub(crate) gemini_api_key_from_env: bool,
     #[serde(skip)]
     pub(crate) claude_api_key_from_env: bool,
+    #[serde(skip)]
+    pub(crate) rag_documents_folder_from_env: bool,
 }
 
 impl Default for Config {
@@ -173,6 +165,7 @@ impl Default for Config {
             chatgpt_api_key_from_env: false,
             gemini_api_key_from_env: false,
             claude_api_key_from_env: false,
+            rag_documents_folder_from_env: false,
         }
     }
 }
@@ -214,7 +207,6 @@ impl Default for RagConfig {
         Self {
             enabled: false,
             mode: RagMode::Vector,
-            runtime_override: RagRuntimeOverride::Default,
             documents_folder: None,
             vector_db_path: default_rag_vector_db_path(),
             max_retrieved_docs: default_rag_max_retrieved_docs(),
@@ -316,6 +308,9 @@ impl Config {
                 section.api_key = "YOUR_ANTHROPIC_API_KEY".to_string();
             }
         }
+        if self.rag_documents_folder_from_env {
+            self.rag.documents_folder = Some(PathBuf::from("YOUR_RAG_DOCUMENTS_FOLDER"));
+        }
     }
 }
 
@@ -342,10 +337,21 @@ fn should_apply_env_api_key(existing: Option<&str>) -> bool {
     }
 }
 
+fn should_apply_env_documents_folder(existing: Option<&Path>) -> bool {
+    match existing {
+        None => true,
+        Some(value) => {
+            let normalized = value.to_string_lossy().trim().to_string();
+            normalized.is_empty() || is_placeholder_env_value(&normalized)
+        }
+    }
+}
+
 fn apply_env_overrides(config: &mut Config) {
     config.chatgpt_api_key_from_env = false;
     config.gemini_api_key_from_env = false;
     config.claude_api_key_from_env = false;
+    config.rag_documents_folder_from_env = false;
 
     if let Some(api_key) = first_env(&["ARMANDO_GEMINI_API_KEY", "GEMINI_API_KEY"]) {
         let current = config
@@ -402,7 +408,17 @@ fn apply_env_overrides(config: &mut Config) {
     }
 
     if let Some(documents_folder) = first_env(&["ARMANDO_RAG_DOCUMENTS_FOLDER"]) {
-        config.rag.documents_folder = Some(PathBuf::from(documents_folder));
+        let current = config.rag.documents_folder.as_ref();
+        let matches_env = current
+            .map(|path| path.to_string_lossy().trim().to_string())
+            .is_some_and(|value| value == documents_folder);
+
+        if should_apply_env_documents_folder(current.map(PathBuf::as_path)) {
+            config.rag.documents_folder = Some(PathBuf::from(documents_folder));
+            config.rag_documents_folder_from_env = true;
+        } else if matches_env {
+            config.rag_documents_folder_from_env = true;
+        }
     }
 }
 
@@ -448,7 +464,6 @@ mod tests {
         assert!(!config.update.beta);
         assert!(!config.rag.enabled);
         assert_eq!(config.rag.mode, RagMode::Vector);
-        assert_eq!(config.rag.runtime_override, RagRuntimeOverride::Default);
         assert!(config.rag.documents_folder.is_none());
         assert_eq!(
             config.rag.vector_db_path,
@@ -465,14 +480,12 @@ mod tests {
         let yaml = r#"
 rag:
   mode: hybrid
-  runtime_override: force_on
   embedding_backend: chatgpt
   embedding_model: text-embedding-3-large
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
 
         assert_eq!(config.rag.mode, RagMode::Hybrid);
-        assert_eq!(config.rag.runtime_override, RagRuntimeOverride::ForceOn);
         assert_eq!(config.rag.embedding_backend.as_deref(), Some("chatgpt"));
         assert_eq!(
             config.rag.embedding_model.as_deref(),
@@ -634,5 +647,62 @@ rag:
         std::env::remove_var("ARMANDO_OPENAI_API_KEY");
         std::env::remove_var("ARMANDO_GEMINI_API_KEY");
         std::env::remove_var("ARMANDO_ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn env_overrides_apply_rag_documents_folder() {
+        let _guard = env_lock();
+        std::env::set_var(
+            "ARMANDO_RAG_DOCUMENTS_FOLDER",
+            "/tmp/armando-rag-from-env-documents",
+        );
+
+        let mut config = Config::default();
+        apply_env_overrides(&mut config);
+
+        assert_eq!(
+            config
+                .rag
+                .documents_folder
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("/tmp/armando-rag-from-env-documents")
+        );
+        assert!(config.rag_documents_folder_from_env);
+
+        std::env::remove_var("ARMANDO_RAG_DOCUMENTS_FOLDER");
+    }
+
+    #[test]
+    fn save_redacts_env_sourced_rag_documents_folder() {
+        let _guard = env_lock();
+        std::env::set_var(
+            "ARMANDO_RAG_DOCUMENTS_FOLDER",
+            "/tmp/armando-rag-from-env-documents",
+        );
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "armando-config-save-rag-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("default.yaml");
+
+        let mut config = Config::default();
+        config.loaded_from = Some(path.clone());
+        apply_env_overrides(&mut config);
+        config.save().unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("/tmp/armando-rag-from-env-documents"));
+        assert!(written.contains("YOUR_RAG_DOCUMENTS_FOLDER"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::env::remove_var("ARMANDO_RAG_DOCUMENTS_FOLDER");
     }
 }

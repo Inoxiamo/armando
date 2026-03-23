@@ -16,11 +16,10 @@ update:
 rag:
   enabled: false
   mode: vector
-  runtime_override: force_on
-  documents_folder: /home/simone/work/test-popup-ai/.test-doc-rag
+  documents_folder: YOUR_RAG_DOCUMENTS_FOLDER
   vector_db_path: .armando-rag.sqlite3
-  max_retrieved_docs: 3
-  chunk_size: 700
+  max_retrieved_docs: 5
+  chunk_size: 128
   embedding_backend: ollama
   embedding_model: nomic-embed-text
 gemini:

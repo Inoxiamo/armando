@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::prompt_profiles::PromptProfiles;
-use crate::rag::{RagRuntimeOverride, RagSystem, RetrievedDocument};
+use crate::rag::{RagSystem, RetrievedDocument};
 use anyhow::{anyhow, Result};
 
 use super::{
@@ -8,21 +8,12 @@ use super::{
     QueryInput, ResponseProgressSink,
 };
 
-pub(super) fn resolve_rag_enabled(config: &Config, rag_override: RagRuntimeOverride) -> bool {
-    match rag_override {
-        RagRuntimeOverride::Default => config.rag.enabled,
-        RagRuntimeOverride::ForceOn => true,
-        RagRuntimeOverride::ForceOff => false,
-    }
-}
-
 pub(super) async fn retrieve_docs(
     backend: &str,
     effective_prompt: &str,
     config: &Config,
-    rag_enabled: bool,
 ) -> Vec<RetrievedDocument> {
-    if !rag_enabled {
+    if !config.rag.enabled {
         return Vec::new();
     }
 

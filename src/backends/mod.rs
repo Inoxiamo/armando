@@ -1,18 +1,27 @@
+#[path = "providers/chatgpt.rs"]
 pub mod chatgpt;
+#[path = "providers/claude.rs"]
 pub mod claude;
+#[path = "pipeline/embedding.rs"]
 pub mod embedding;
+#[path = "providers/gemini.rs"]
 pub mod gemini;
+#[path = "ops/health.rs"]
 pub mod health;
+#[path = "catalog/models.rs"]
 pub mod models;
+#[path = "providers/ollama.rs"]
 pub mod ollama;
+#[path = "pipeline/prompt.rs"]
 pub mod prompt;
+#[path = "pipeline/query_flow.rs"]
 mod query_flow;
 
 use crate::config::Config;
 use crate::history;
 use crate::logging;
 use crate::prompt_profiles::PromptProfiles;
-use crate::rag::{RagSystem, RetrievedDocument};
+use crate::rag::RetrievedDocument;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,10 +83,8 @@ pub async fn query(
     progress: Option<ResponseProgressSink>,
 ) -> String {
     let request_id = logging::log_request(config, backend, input);
-    let (effective_prompt, rag_override) = RagSystem::parse_prompt_override(&input.prompt);
-    let rag_enabled = query_flow::resolve_rag_enabled(config, rag_override);
-    let retrieved_docs =
-        query_flow::retrieve_docs(backend, &effective_prompt, config, rag_enabled).await;
+    let effective_prompt = input.prompt.clone();
+    let retrieved_docs = query_flow::retrieve_docs(backend, &effective_prompt, config).await;
     let prepared_prompt = query_flow::build_prepared_prompt(
         input,
         &effective_prompt,
@@ -249,6 +256,7 @@ mod tests {
             chatgpt_api_key_from_env: false,
             gemini_api_key_from_env: false,
             claude_api_key_from_env: false,
+            rag_documents_folder_from_env: false,
         }
     }
 

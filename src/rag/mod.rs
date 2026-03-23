@@ -28,13 +28,6 @@ pub struct RetrievedDocument {
     pub score: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RagRuntimeOverride {
-    Default,
-    ForceOn,
-    ForceOff,
-}
-
 #[derive(Debug, Clone)]
 pub struct IndexStats {
     pub indexed_files: usize,
@@ -67,21 +60,6 @@ impl RagSystem {
 
     pub fn is_enabled(&self) -> bool {
         self.config.enabled
-    }
-
-    pub fn parse_prompt_override(prompt: &str) -> (String, RagRuntimeOverride) {
-        let trimmed = prompt.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("!rag off") {
-            return (rest.trim_start().to_string(), RagRuntimeOverride::ForceOff);
-        }
-        if let Some(rest) = trimmed.strip_prefix("!rag on") {
-            return (rest.trim_start().to_string(), RagRuntimeOverride::ForceOn);
-        }
-        if let Some(rest) = trimmed.strip_prefix("!rag") {
-            return (rest.trim_start().to_string(), RagRuntimeOverride::ForceOn);
-        }
-
-        (prompt.to_string(), RagRuntimeOverride::Default)
     }
 
     pub async fn index_documents(&self, backend: &str, config: &Config) -> Result<IndexStats> {

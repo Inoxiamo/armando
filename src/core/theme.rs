@@ -223,6 +223,7 @@ danger_color: \"#A1A2A3\"\n",
             chatgpt_api_key_from_env: false,
             gemini_api_key_from_env: false,
             claude_api_key_from_env: false,
+            rag_documents_folder_from_env: false,
         };
 
         let theme = load_theme(&config).unwrap();

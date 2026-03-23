@@ -1,4 +1,4 @@
-use crate::config::{RagMode, RagRuntimeOverride};
+use crate::config::RagMode;
 use crate::rag::RagCorpusStats;
 use std::path::PathBuf;
 
@@ -64,49 +64,6 @@ pub(super) fn render_rag_settings_section(
                             .clicked()
                         {
                             app.config.rag.mode = mode;
-                            app.persist_settings();
-                        }
-                    }
-                });
-        });
-
-        ui.add_space(8.0);
-        ui.label(muted_label(
-            &app.tr("settings.rag_runtime_override"),
-            app.theme.weak_text_color,
-        ));
-        let runtime_override_label = match app.config.rag.runtime_override {
-            RagRuntimeOverride::Default => app.tr("settings.rag_runtime_default"),
-            RagRuntimeOverride::ForceOn => app.tr("settings.rag_runtime_force_on"),
-            RagRuntimeOverride::ForceOff => app.tr("settings.rag_runtime_force_off"),
-        };
-        let runtime_override_theme = app.theme.clone();
-        dropdown_box_scope(ui, &runtime_override_theme, |ui| {
-            egui::ComboBox::from_id_source("settings_rag_runtime_override")
-                .selected_text(dropdown_button_text(
-                    &runtime_override_label,
-                    &runtime_override_theme,
-                ))
-                .width(220.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &runtime_override_theme);
-                    let options = [
-                        (RagRuntimeOverride::Default, "settings.rag_runtime_default"),
-                        (RagRuntimeOverride::ForceOn, "settings.rag_runtime_force_on"),
-                        (
-                            RagRuntimeOverride::ForceOff,
-                            "settings.rag_runtime_force_off",
-                        ),
-                    ];
-                    for (mode, label_key) in options {
-                        if ui
-                            .selectable_label(
-                                app.config.rag.runtime_override == mode,
-                                dropdown_item_text(&app.tr(label_key), &runtime_override_theme),
-                            )
-                            .clicked()
-                        {
-                            app.config.rag.runtime_override = mode;
                             app.persist_settings();
                         }
                     }
@@ -361,11 +318,6 @@ pub(super) fn render_rag_settings_section(
                 app.theme.weak_text_color,
             ));
         }
-
-        ui.label(muted_label(
-            &app.tr("settings.rag_runtime_hint"),
-            app.theme.weak_text_color,
-        ));
     });
 }
 

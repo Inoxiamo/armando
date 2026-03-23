@@ -97,6 +97,7 @@ mod tests {
             chatgpt_api_key_from_env: false,
             gemini_api_key_from_env: false,
             claude_api_key_from_env: false,
+            rag_documents_folder_from_env: false,
         }
     }
 

@@ -1,5 +1,5 @@
 use armando::app_paths;
-use armando::config::{Config, RagMode, RagRuntimeOverride};
+use armando::config::{Config, RagMode};
 
 mod support;
 
@@ -231,7 +231,7 @@ fn bundled_profile_templates_are_discovered_and_loadable() {
 }
 
 #[test]
-fn config_save_roundtrips_rag_mode_and_runtime_override() {
+fn config_save_roundtrips_rag_mode() {
     let _guard = support::test_lock();
     let temp_dir = support::unique_temp_dir("config-rag-roundtrip");
     let config_path = temp_dir.join("config.yaml");
@@ -242,7 +242,6 @@ default_backend: ollama
 rag:
   enabled: true
   mode: keyword
-  runtime_override: force_off
 ",
     )
     .unwrap();
@@ -252,15 +251,12 @@ rag:
 
     let mut config = Config::load().unwrap();
     assert_eq!(config.rag.mode, RagMode::Keyword);
-    assert_eq!(config.rag.runtime_override, RagRuntimeOverride::ForceOff);
 
     config.rag.mode = RagMode::Hybrid;
-    config.rag.runtime_override = RagRuntimeOverride::ForceOn;
     config.save().unwrap();
 
     let reloaded = Config::load().unwrap();
     assert_eq!(reloaded.rag.mode, RagMode::Hybrid);
-    assert_eq!(reloaded.rag.runtime_override, RagRuntimeOverride::ForceOn);
 
     match previous {
         Some(value) => std::env::set_var("ARMANDO_CONFIG", value),

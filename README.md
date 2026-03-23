@@ -106,14 +106,15 @@ RAG is configured under `rag` and can be switched between lexical and semantic r
 rag:
   enabled: true
   mode: keyword # keyword | vector | hybrid
-  runtime_override: default # default | force_on | force_off
-  documents_folder: ".test-doc-rag"
+  documents_folder: "YOUR_RAG_DOCUMENTS_FOLDER"
   vector_db_path: ".armando-rag.sqlite3"
   max_retrieved_docs: 4
   chunk_size: 1200
   embedding_backend: "ollama" # optional, for vector/hybrid
   embedding_model: "nomic-embed-text" # optional, for vector/hybrid
 ```
+
+`documents_folder` can also be supplied from `.env` with `ARMANDO_RAG_DOCUMENTS_FOLDER`.
 
 When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
 
@@ -146,7 +147,6 @@ When the settings panel is open, the footer shows the current app version and, o
 
 When vector scoring is active, `rag.embedding_backend` and `rag.embedding_model` let you decouple embedding from the currently selected query backend/model.
 If `rag.embedding_backend` is not set, embeddings follow the selected query backend (or `default_backend` if needed).
-Runtime prompt overrides are available with `!rag on` and `!rag off`.
 
 ### Ollama Recommendation For RAG
 
