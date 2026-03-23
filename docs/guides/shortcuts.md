@@ -89,6 +89,6 @@ If you want one built-in global hotkey managed directly by `armando`, it has to 
 
 ## Next Steps
 
-- For release download and install steps, see [`INSTALL.md`](INSTALL.md).
-- For versioning and release artifacts, see [`RELEASES.md`](RELEASES.md).
-- For the repository layout, see [`STRUCTURE.md`](STRUCTURE.md).
+- For release download and install steps, see [`/docs/getting-started/install.md`](/docs/getting-started/install.md).
+- For versioning and release artifacts, see [`/docs/guides/releases.md`](/docs/guides/releases.md).
+- For the repository layout, see [`/docs/reference/repository-structure.md`](/docs/reference/repository-structure.md).

@@ -515,4 +515,49 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn prompt_profiles_prefer_configs_prompts_over_legacy_root_files() {
+        let temp_dir = unique_temp_dir("prompt-precedence");
+        std::fs::create_dir_all(temp_dir.join("configs/prompts")).unwrap();
+        write_yaml(
+            &temp_dir.join("configs/default.yaml"),
+            "default_backend: ollama\n",
+        );
+        write_yaml(
+            &temp_dir.join("configs/prompts/prompt-tags.yaml"),
+            "tags:\n  TITLE: \"Nuovo titolo\"\n",
+        );
+        write_yaml(
+            &temp_dir.join("prompt-tags.yaml"),
+            "tags:\n  TITLE: \"Vecchio titolo\"\n",
+        );
+        write_yaml(
+            &temp_dir.join("configs/prompts/generic-prompts.yaml"),
+            "tags:\n  CMD:\n    instruction: \"Nuovo cmd\"\n    strip_header: true\n",
+        );
+        write_yaml(
+            &temp_dir.join("generic-prompts.yaml"),
+            "tags:\n  CMD:\n    instruction: \"Vecchio cmd\"\n    strip_header: true\n",
+        );
+
+        let mut config = test_config();
+        config.loaded_from = Some(temp_dir.join("configs/default.yaml"));
+
+        let profiles = PromptProfiles::load(&config).unwrap();
+        assert_eq!(
+            profiles.text_assist_tags.get("TITLE"),
+            Some(&"Nuovo titolo".to_string())
+        );
+        assert_eq!(
+            profiles
+                .generic_question_tags
+                .get("CMD")
+                .unwrap()
+                .instruction,
+            "Nuovo cmd"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

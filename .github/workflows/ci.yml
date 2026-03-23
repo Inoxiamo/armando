@@ -29,12 +29,12 @@ jobs:
 
       - name: Run unit, integration, and functional tests
         run: |
-          chmod +x scripts/run-container-tests.sh
+          chmod +x scripts/ci/run-container-tests.sh
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             armando-test-runner \
-            bash scripts/run-container-tests.sh "ci-${{ github.sha }}"
+            bash scripts/ci/run-container-tests.sh "ci-${{ github.sha }}"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4

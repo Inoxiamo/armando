@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="armando"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN_DIR="${HOME}/.local/bin"
 PLATFORM="${ARMANDO_INSTALL_OS:-$(uname -s)}"
 TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT_DIR}/target}"
@@ -28,8 +28,8 @@ LOCALES_DIR="${CONFIG_ROOT}/locales"
 ASSETS_DIR="${DATA_ROOT}/assets"
 RELEASE_BIN="${TARGET_DIR}/release/${APP_NAME}"
 CONFIG_SOURCE="${ROOT_DIR}/configs/default.yaml"
-PROMPT_TAGS_SOURCE="${ROOT_DIR}/prompt-tags.yaml"
-GENERIC_PROMPTS_SOURCE="${ROOT_DIR}/generic-prompts.yaml"
+PROMPT_TAGS_SOURCE="${ROOT_DIR}/configs/prompts/prompt-tags.yaml"
+GENERIC_PROMPTS_SOURCE="${ROOT_DIR}/configs/prompts/generic-prompts.yaml"
 ICON_SOURCE="${ROOT_DIR}/assets/${APP_NAME}.svg"
 DESKTOP_SOURCE="${ROOT_DIR}/assets/${APP_NAME}.desktop"
 

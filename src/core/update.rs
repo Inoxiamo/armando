@@ -6,7 +6,7 @@ pub const GITHUB_RELEASES_API_URL: &str =
 pub const GITHUB_RELEASES_API_LIST_URL: &str =
     "https://api.github.com/repos/Inoxiamo/armando/releases?per_page=20";
 pub const GITHUB_BOOTSTRAP_SCRIPT_URL: &str =
-    "https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh";
+    "https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/release/bootstrap-release.sh";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateAction {

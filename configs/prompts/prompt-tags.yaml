@@ -1,5 +1,4 @@
 # Legacy fallback location. Preferred: configs/prompts/prompt-tags.yaml
-# Legacy fallback location. Preferred: configs/prompts/prompt-tags.yaml
 tags:
   GMAIL: "Write or rewrite the text as a professional, clear, and natural email."
   EMAIL: "Write or rewrite the text as a professional, clear, and natural email."

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONTAINER_NAME="${SONAR_CONTAINER_NAME:-armando-sonarqube-local}"
 SONAR_IMAGE="${SONAR_IMAGE:-sonarqube:9.9-community}"
 SONAR_PORT="${SONAR_PORT:-9000}"

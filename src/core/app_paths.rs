@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 pub const APP_DIR_NAME: &str = "armando";
 const CONFIGS_DIR_NAME: &str = "configs";
+const PROMPTS_DIR_NAME: &str = "prompts";
 const THEMES_DIR_NAME: &str = "themes";
 const LOCALES_DIR_NAME: &str = "locales";
 const DEFAULT_CONFIG_FILE_NAME: &str = "default.yaml";
@@ -316,10 +317,16 @@ fn prompt_profile_roots_from_config(config_path: &Path) -> Vec<PathBuf> {
     if let Some(parent) = config_path.parent() {
         if parent.file_name().and_then(|name| name.to_str()) == Some(CONFIGS_DIR_NAME) {
             if let Some(root) = parent.parent() {
-                roots.push(root.to_path_buf());
-                roots.push(root.join(CONFIGS_DIR_NAME));
+                for candidate in prompt_profile_roots_from_root(root) {
+                    roots.push(candidate);
+                }
+            }
+        } else {
+            for candidate in prompt_profile_roots_from_root(parent) {
+                roots.push(candidate);
             }
         }
+        roots.push(parent.join(PROMPTS_DIR_NAME));
         roots.push(parent.to_path_buf());
     }
 
@@ -327,7 +334,11 @@ fn prompt_profile_roots_from_config(config_path: &Path) -> Vec<PathBuf> {
 }
 
 fn prompt_profile_roots_from_root(root: &Path) -> Vec<PathBuf> {
-    vec![root.to_path_buf(), root.join(CONFIGS_DIR_NAME)]
+    vec![
+        root.join(CONFIGS_DIR_NAME).join(PROMPTS_DIR_NAME),
+        root.to_path_buf(),
+        root.join(CONFIGS_DIR_NAME),
+    ]
 }
 
 fn candidate_resource_roots(dir_name: &str) -> anyhow::Result<Vec<PathBuf>> {
@@ -388,5 +399,21 @@ mod tests {
         assert!(names.contains(&"work".to_string()));
         assert!(names.contains(&"personal".to_string()));
         assert!(names.contains(&"beta".to_string()));
+    }
+
+    #[test]
+    fn prompt_profile_roots_prefer_configs_prompts_then_legacy_root() {
+        let roots = prompt_profile_roots_from_root(Path::new("/tmp/armando"));
+        assert_eq!(roots[0], PathBuf::from("/tmp/armando/configs/prompts"));
+        assert_eq!(roots[1], PathBuf::from("/tmp/armando"));
+    }
+
+    #[test]
+    fn config_relative_prompt_roots_include_configs_prompts_first() {
+        let roots =
+            prompt_profile_roots_from_config(Path::new("/tmp/armando/configs/default.yaml"));
+
+        assert_eq!(roots[0], PathBuf::from("/tmp/armando/configs/prompts"));
+        assert!(roots.contains(&PathBuf::from("/tmp/armando")));
     }
 }

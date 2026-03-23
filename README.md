@@ -29,18 +29,18 @@ git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
 ```
 
-The local installer (`scripts/install-local.sh`) applies this automatically.
+The local installer (`scripts/dev/install-local.sh`) applies this automatically.
 
 ## Get armando
 
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>
 - All releases: <https://github.com/Inoxiamo/armando/releases>
 
-Start with [`INSTALL.md`](INSTALL.md) for the release download, OS-specific install steps, config paths, and first-run setup. The first-run card can also seed a new config from one of the bundled templates in `configs/`.
+Start with [`/docs/getting-started/install.md`](/docs/getting-started/install.md) for the release download, OS-specific install steps, config paths, and first-run setup. The first-run card can also seed a new config from one of the bundled templates in `configs/`.
 
 ## Configure It
 
-The repository ships defaults under [`configs/`](configs), [`themes/`](themes), [`locales/`](locales), plus [`prompt-tags.yaml`](prompt-tags.yaml) and [`generic-prompts.yaml`](generic-prompts.yaml).
+The repository ships defaults under [`configs/`](configs), [`configs/prompts/`](configs/prompts), [`themes/`](themes), and [`locales/`](locales).
 `configs/` now doubles as a small set of reusable config templates for first-run setup, so the initial profile can start from a known-good base instead of an empty file. The bundled set currently includes `default`, `local`, `work`, `personal`, and `beta`.
 After installation, `armando` reads configuration from the platform-standard config directory for `armando`, with this structure:
 
@@ -60,8 +60,10 @@ armando/
     custom-language.yaml
 ```
 
+In-source prompt preset templates now live under `configs/prompts/`. Runtime discovery still supports legacy root-level preset files for backward compatibility.
+
 The ChatGPT backend uses OpenAI's Responses API.
-For exact install paths and first configuration on each OS, see [`INSTALL.md`](INSTALL.md).
+For exact install paths and first configuration on each OS, see [`/docs/getting-started/install.md`](/docs/getting-started/install.md).
 
 API keys can be loaded from environment variables (or a local `.env` file in the project/app working directory):
 
@@ -75,7 +77,7 @@ Keep `.env` local and uncommitted.
 
 Operational data is split between config and app data directories:
 
-- Config/profile files: platform config dir under `armando/` (see `INSTALL.md`), unless overridden with `ARMANDO_CONFIG`.
+- Config/profile files: platform config dir under `armando/` (see `/docs/getting-started/install.md`), unless overridden with `ARMANDO_CONFIG`.
 - History (when enabled): `.../armando/history/history.jsonl`.
 - Debug logs (when enabled): `.../armando/logs/debug.jsonl` and `.../armando/logs/debug-readable.log`.
 - RAG vector DB: `rag.vector_db_path` from config. Default is `.armando-rag.sqlite3`.
@@ -180,8 +182,8 @@ cargo run -- --rag-index
 
 ## Prompt Presets
 
-Text-assist tags such as `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are loaded from `prompt-tags.yaml`.
-Generic-question presets such as `CMD:` are loaded from `generic-prompts.yaml`.
+Text-assist tags such as `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are loaded from `configs/prompts/prompt-tags.yaml` (fallback: `prompt-tags.yaml`).
+Generic-question presets such as `CMD:` are loaded from `configs/prompts/generic-prompts.yaml` (fallback: `generic-prompts.yaml`).
 Language selection is handled centrally by the app, with support for explicit tags such as `EN`, `ENG`, `ITALIAN`, `ESP`, `FRA`, `DEU`, `JPN`, and many other common aliases.
 
 Both files are read only at startup. The merge order is:
@@ -190,7 +192,7 @@ Both files are read only at startup. The merge order is:
 - legacy `aliases` from `configs/default.yaml`
 - dedicated prompt files, which win on conflicts
 
-Example `prompt-tags.yaml`:
+Example `configs/prompts/prompt-tags.yaml`:
 
 ```yaml
 tags:
@@ -199,7 +201,7 @@ tags:
   SHORT: "Keep the final result short and concise."
 ```
 
-Example `generic-prompts.yaml`:
+Example `configs/prompts/generic-prompts.yaml`:
 
 ```yaml
 tags:
@@ -216,7 +218,7 @@ The old `aliases` section in the main config is still supported as a legacy fall
 
 The fastest way to adapt `armando` to your workflow is to customize the prompt preset files.
 
-Use `prompt-tags.yaml` for rewrite-oriented tags that modify how an existing text should be transformed:
+Use `configs/prompts/prompt-tags.yaml` for rewrite-oriented tags that modify how an existing text should be transformed:
 
 ```yaml
 tags:
@@ -225,7 +227,7 @@ tags:
   SHORT: "Keep the final result short and concise."
 ```
 
-Use `generic-prompts.yaml` for direct-question presets that should inject a reusable instruction block:
+Use `configs/prompts/generic-prompts.yaml` for direct-question presets that should inject a reusable instruction block:
 
 ```yaml
 tags:
@@ -281,15 +283,15 @@ The settings panel centralizes the most important runtime controls and checks:
 System-level shortcuts are supported on Linux, macOS, and Windows.
 The release bundle does not yet provide one built-in universal global hotkey that registers itself identically on every OS, so shortcut setup is still delegated to the operating system.
 
-Use [`SHORTCUTS.md`](SHORTCUTS.md) for the practical setup steps.
+Use [`/docs/guides/shortcuts.md`](/docs/guides/shortcuts.md) for the practical setup steps.
 
 ## Public Docs
 
-- Install and first setup: [`INSTALL.md`](INSTALL.md)
-- Keyboard shortcuts: [`SHORTCUTS.md`](SHORTCUTS.md)
-- Releases, versions, and artifacts: [`RELEASES.md`](RELEASES.md)
-- Visual regression checklist: [`VISUAL_REGRESSION.md`](VISUAL_REGRESSION.md)
-- Repository map: [`STRUCTURE.md`](STRUCTURE.md)
+- Install and first setup: [`/docs/getting-started/install.md`](/docs/getting-started/install.md)
+- Keyboard shortcuts: [`/docs/guides/shortcuts.md`](/docs/guides/shortcuts.md)
+- Releases, versions, and artifacts: [`/docs/guides/releases.md`](/docs/guides/releases.md)
+- Visual regression checklist: [`/docs/qa/visual-regression.md`](/docs/qa/visual-regression.md)
+- Repository map: [`/docs/reference/repository-structure.md`](/docs/reference/repository-structure.md)
 
 ## Local Validation
 
@@ -299,7 +301,7 @@ To run the same Linux container flow locally:
 
 ```bash
 docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
-docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/run-container-tests.sh
+docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/ci/run-container-tests.sh
 ```
 
 This produces logs under `target/test-artifacts/` and a Linux bundle under `target/dist/`.

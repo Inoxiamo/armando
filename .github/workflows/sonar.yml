@@ -39,10 +39,10 @@ jobs:
         if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
         shell: bash
         run: |
-          chmod +x scripts/export-clippy-sonar-report.sh
-          chmod +x scripts/export-rust-coverage.sh
-          scripts/export-clippy-sonar-report.sh
-          scripts/export-rust-coverage.sh
+          chmod +x scripts/quality/export-clippy-sonar-report.sh
+          chmod +x scripts/quality/export-rust-coverage.sh
+          scripts/quality/export-clippy-sonar-report.sh
+          scripts/quality/export-rust-coverage.sh
 
       - name: SonarQube Scan
         if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}

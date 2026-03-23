@@ -21,17 +21,17 @@ If you want the simplest local setup, start with `ollama`.
 If you prefer a guided install or update on Linux or macOS, you can use the bootstrap wrapper instead of downloading the archive manually:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/release/bootstrap-release.sh | bash
 ```
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh | bash
+wget -qO- https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/release/bootstrap-release.sh | bash
 ```
 
 Safer alternative without pipe-to-shell:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh
+curl -fsSLO https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/release/bootstrap-release.sh
 bash bootstrap-release.sh
 ```
 
@@ -354,6 +354,6 @@ If you use Ollama, make sure the local server is already running before launchin
 
 ## Next Steps
 
-- For keyboard shortcut setup, see [`SHORTCUTS.md`](SHORTCUTS.md).
-- For release naming and versioning, see [`RELEASES.md`](RELEASES.md).
-- For the repository layout, see [`STRUCTURE.md`](STRUCTURE.md).
+- For keyboard shortcut setup, see [`/docs/guides/shortcuts.md`](/docs/guides/shortcuts.md).
+- For release naming and versioning, see [`/docs/guides/releases.md`](/docs/guides/releases.md).
+- For the repository layout, see [`/docs/reference/repository-structure.md`](/docs/reference/repository-structure.md).

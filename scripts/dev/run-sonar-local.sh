@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SONAR_PORT="${SONAR_PORT:-9000}"
 SONAR_URL="${SONAR_URL:-http://127.0.0.1:${SONAR_PORT}}"
 SONAR_ADMIN_USER="${SONAR_ADMIN_USER:-admin}"
@@ -28,9 +28,9 @@ if [[ -z "${PROJECT_KEY}" ]]; then
   exit 1
 fi
 
-bash "${ROOT_DIR}/scripts/start-sonar-local.sh"
-bash "${ROOT_DIR}/scripts/export-clippy-sonar-report.sh"
-bash "${ROOT_DIR}/scripts/export-rust-coverage.sh"
+bash "${ROOT_DIR}/scripts/dev/start-sonar-local.sh"
+bash "${ROOT_DIR}/scripts/quality/export-clippy-sonar-report.sh"
+bash "${ROOT_DIR}/scripts/quality/export-rust-coverage.sh"
 
 GENERATED_TOKEN=""
 TOKEN_NAME=""

@@ -22,7 +22,7 @@ When an update is available, the settings footer also surfaces a guided next ste
 Linux and macOS users can also use the guided bootstrap wrapper from the repository:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/bootstrap-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Inoxiamo/armando/master/scripts/release/bootstrap-release.sh | bash
 ```
 
 Pass a version as the first argument or set `ARMANDO_INSTALL_VERSION=<version>` before invoking it if you want a specific tag instead of `latest`.
@@ -83,24 +83,24 @@ Before publishing a version, the repository can validate:
 Local command:
 
 ```bash
-bash scripts/pre-release-check.sh v0.0.2-rc3
+bash scripts/release/pre-release-check.sh v0.0.2-rc3
 ```
 
 Optional local Sonar smoke test:
 
 ```bash
-bash scripts/run-sonar-local.sh
+bash scripts/dev/run-sonar-local.sh
 ```
 
 For the full containerized flow used in CI:
 
 ```bash
 docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
-docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/run-container-tests.sh
+docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/ci/run-container-tests.sh
 ```
 
 ## Next Steps
 
-- For release installation, see [`INSTALL.md`](INSTALL.md).
-- For keyboard shortcut setup after install, see [`SHORTCUTS.md`](SHORTCUTS.md).
-- For the repository layout, see [`STRUCTURE.md`](STRUCTURE.md).
+- For release installation, see [`/docs/getting-started/install.md`](/docs/getting-started/install.md).
+- For keyboard shortcut setup after install, see [`/docs/guides/shortcuts.md`](/docs/guides/shortcuts.md).
+- For the repository layout, see [`/docs/reference/repository-structure.md`](/docs/reference/repository-structure.md).

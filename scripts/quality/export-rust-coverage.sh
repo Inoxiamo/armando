@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
 SYSROOT="$(rustc --print sysroot)"
 LLVM_BIN_DIR="${SYSROOT}/lib/rustlib/${HOST_TRIPLE}/bin"
@@ -31,7 +31,7 @@ export LLVM_PROFILE_FILE="${ARTIFACT_DIR}/armando-%p-%m.profraw"
 cargo test --all-targets
 cargo test --all-targets --no-run --message-format=json >"${RAW_METADATA}"
 
-python3 "${ROOT_DIR}/scripts/extract_cargo_test_executables.py" \
+python3 "${ROOT_DIR}/scripts/quality/extract_cargo_test_executables.py" \
   "${RAW_METADATA}" \
   >"${EXECUTABLE_LIST}"
 
@@ -57,6 +57,6 @@ fi
   "${TEST_EXECUTABLES[@]}" \
   >"${SUMMARY_REPORT}"
 
-python3 "${ROOT_DIR}/scripts/lcov_to_sonar_coverage.py" \
+python3 "${ROOT_DIR}/scripts/quality/lcov_to_sonar_coverage.py" \
   "${LCOV_REPORT}" \
   "${SONAR_REPORT}"

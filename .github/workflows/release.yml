@@ -66,12 +66,12 @@ jobs:
       - name: Run pre-release checks
         shell: bash
         run: |
-          chmod +x scripts/pre-release-check.sh
-          chmod +x scripts/verify-release-version.sh
+          chmod +x scripts/release/pre-release-check.sh
+          chmod +x scripts/release/verify-release-version.sh
           if [[ -n "${RELEASE_TAG}" ]]; then
-            scripts/pre-release-check.sh "${RELEASE_TAG}"
+            scripts/release/pre-release-check.sh "${RELEASE_TAG}"
           else
-            scripts/pre-release-check.sh
+            scripts/release/pre-release-check.sh
           fi
 
       - name: Build test runner image
@@ -79,12 +79,12 @@ jobs:
 
       - name: Run unit, integration, and functional tests
         run: |
-          chmod +x scripts/run-container-tests.sh
+          chmod +x scripts/ci/run-container-tests.sh
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             armando-test-runner \
-            bash scripts/run-container-tests.sh "release-${{ github.sha }}"
+            bash scripts/ci/run-container-tests.sh "release-${{ github.sha }}"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
@@ -134,9 +134,9 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          chmod +x scripts/package-release.sh
+          chmod +x scripts/release/package-release.sh
           VERSION="${RELEASE_VERSION}"
-          scripts/package-release.sh \
+          scripts/release/package-release.sh \
             "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" \
             "${{ matrix.target }}" \
             "${VERSION}"
@@ -166,7 +166,7 @@ jobs:
           Copy-Item "themes/*.yaml" "$bundle/themes/"
           Copy-Item "locales/*.yaml" "$bundle/locales/"
           Copy-Item "assets/*" "$bundle/assets/" -Recurse
-          Copy-Item "scripts/release-install.ps1" "$bundle/scripts/install.ps1"
+          Copy-Item "scripts/release/release-install.ps1" "$bundle/scripts/install.ps1"
           Compress-Archive -Path "$bundle/*" -DestinationPath "$bundle.zip" -Force
 
       - name: Create Windows checksum
