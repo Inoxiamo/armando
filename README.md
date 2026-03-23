@@ -11,6 +11,7 @@ It stays close to your workflow so you can ask questions, rewrite text, attach i
 - External YAML configuration, themes, locales, and prompt preset files
 - In-app GitHub release check with version comparison and download shortcut when an update is available
 - Optional local history and optional debug logging
+- Optional RAG with `keyword`, `vector`, or `hybrid` retrieval modes
 - Image attachments, clipboard image paste, and voice dictation
 - Release bundles for Linux, macOS, and Windows
 
@@ -18,16 +19,28 @@ It stays close to your workflow so you can ask questions, rewrite text, attach i
 
 This repository is developed in a vibe-coding style, with fast iterative changes, but every change still goes through automated validation plus a double human check before any push: one review by the person or agent implementing the change, and a second human review at the parent/final check stage.
 
+### Pre-commit Secret Guard
+
+The repository ships a versioned git hook at `.githooks/pre-commit` that blocks accidental secret commits (for example real API keys or local `.env` files).
+To enable it locally:
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+```
+
+The local installer (`scripts/dev/install-local.sh`) applies this automatically.
+
 ## Get armando
 
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>
 - All releases: <https://github.com/Inoxiamo/armando/releases>
 
-Start with [`INSTALL.md`](INSTALL.md) for the release download, OS-specific install steps, config paths, and first-run setup. The first-run card can also seed a new config from one of the bundled templates in `configs/`.
+Start with [`/docs/getting-started/install.md`](/docs/getting-started/install.md) for the release download, OS-specific install steps, config paths, and first-run setup. The first-run card can also seed a new config from one of the bundled templates in `configs/`.
 
 ## Configure It
 
-The repository ships defaults under [`configs/`](configs), [`themes/`](themes), [`locales/`](locales), plus [`prompt-tags.yaml`](prompt-tags.yaml) and [`generic-prompts.yaml`](generic-prompts.yaml).
+The repository ships defaults under [`configs/`](configs), [`configs/prompts/`](configs/prompts), [`themes/`](themes), and [`locales/`](locales).
 `configs/` now doubles as a small set of reusable config templates for first-run setup, so the initial profile can start from a known-good base instead of an empty file. The bundled set currently includes `default`, `local`, `work`, `personal`, and `beta`.
 After installation, `armando` reads configuration from the platform-standard config directory for `armando`, with this structure:
 
@@ -47,8 +60,32 @@ armando/
     custom-language.yaml
 ```
 
+In-source prompt preset templates now live under `configs/prompts/`. Runtime discovery still supports legacy root-level preset files for backward compatibility.
+
 The ChatGPT backend uses OpenAI's Responses API.
-For exact install paths and first configuration on each OS, see [`INSTALL.md`](INSTALL.md).
+For exact install paths and first configuration on each OS, see [`/docs/getting-started/install.md`](/docs/getting-started/install.md).
+
+API keys can be loaded from environment variables (or a local `.env` file in the project/app working directory):
+
+- `ARMANDO_OPENAI_API_KEY` (or `OPENAI_API_KEY`)
+- `ARMANDO_GEMINI_API_KEY` (or `GEMINI_API_KEY`)
+- `ARMANDO_ANTHROPIC_API_KEY` (or `ANTHROPIC_API_KEY`)
+
+Keep `.env` local and uncommitted.
+
+### Local Runtime Data
+
+Operational data is split between config and app data directories:
+
+- Config/profile files: platform config dir under `armando/` (see `/docs/getting-started/install.md`), unless overridden with `ARMANDO_CONFIG`.
+- History (when enabled): `.../armando/history/history.jsonl`.
+- Debug logs (when enabled): `.../armando/logs/debug.jsonl` and `.../armando/logs/debug-readable.log`.
+- RAG vector DB: `rag.vector_db_path` from config. Default is `.armando-rag.sqlite3`.
+
+Dev/local run context:
+
+- When `rag.vector_db_path` is relative (default), it is resolved from the current working directory where you start the app/CLI (`cargo run`, `--rag-index`, etc.).
+- Config discovery checks `ARMANDO_CONFIG`, executable-adjacent paths, current working directory, then the platform config dir.
 
 The `ui` section supports visual preferences such as language and initial window height. Example:
 
@@ -57,6 +94,29 @@ ui:
   language: "it"
   window_height: 640
 ```
+
+Update channel can be pinned to stable-only or include RC builds:
+
+```yaml
+update:
+  beta: false # true = include prerelease/RC updates
+```
+
+RAG is configured under `rag` and can be switched between lexical and semantic retrieval:
+
+```yaml
+rag:
+  enabled: true
+  mode: keyword # keyword | vector | hybrid
+  documents_folder: "YOUR_RAG_DOCUMENTS_FOLDER"
+  vector_db_path: ".armando-rag.sqlite3"
+  max_retrieved_docs: 4
+  chunk_size: 1200
+  embedding_backend: "ollama" # optional, for vector/hybrid
+  embedding_model: "nomic-embed-text" # optional, for vector/hybrid
+```
+
+`documents_folder` can also be supplied from `.env` with `ARMANDO_RAG_DOCUMENTS_FOLDER`.
 
 When the settings panel is open, the footer shows the current app version and, only if a newer GitHub release exists, a small update button that opens the latest downloadable release.
 
@@ -77,15 +137,53 @@ When the settings panel is open, the footer shows the current app version and, o
 ## Planned
 
 - MCP integration for safe external tools and richer runtime context
-- RAG support for retrieving project docs, notes, and release context before larger changes
 - Agent-oriented workflow improvements with clearer delegation, recap, and push-gating rules
 - Beta tools panel for terminal, CLI, MCP, and backend-status visibility
 - Safer command execution flow with explicit confirmation for sensitive actions
 
+## RAG Modes
+
+- `keyword`: lexical retrieval with SQLite FTS5/BM25; no embedding API calls.
+- `vector`: embedding-based retrieval with cosine similarity.
+- `hybrid`: combines lexical + vector scores.
+
+When vector scoring is active, `rag.embedding_backend` and `rag.embedding_model` let you decouple embedding from the currently selected query backend/model.
+If `rag.embedding_backend` is not set, embeddings follow the selected query backend (or `default_backend` if needed).
+
+### Ollama Recommendation For RAG
+
+For local RAG, use a dedicated embedding model instead of reusing the chat model.
+
+- Suggested RAG embedding backend/model:
+  - `rag.embedding_backend: ollama`
+  - `rag.embedding_model: nomic-embed-text`
+- Suggested Ollama chat model can stay separate in `ollama.model` (for example `gemma3:1b`, `llama3`, etc.).
+
+Download the dedicated embedding model once:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+### Gemini: Query vs Embedding Model Mismatch
+
+Gemini can query with one model and embed with another. A common failure is using a text-generation model as `rag.embedding_model`.
+
+- Symptom: normal Gemini chat works, but RAG indexing/retrieval fails on embedding calls.
+- Cause: query uses `generateContent`, embeddings require a model that supports `embedContent`.
+- Fix: set `rag.embedding_model` to an embedding model (for example `text-embedding-004`), or remove the override and let fallback pick a compatible embedding model.
+- If needed, pin `rag.embedding_backend: gemini` so embeddings do not follow a different active backend.
+
+To pre-index documents offline:
+
+```bash
+cargo run -- --rag-index
+```
+
 ## Prompt Presets
 
-Text-assist tags such as `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are loaded from `prompt-tags.yaml`.
-Generic-question presets such as `CMD:` are loaded from `generic-prompts.yaml`.
+Text-assist tags such as `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are loaded from `configs/prompts/prompt-tags.yaml` (fallback: `prompt-tags.yaml`).
+Generic-question presets such as `CMD:` are loaded from `configs/prompts/generic-prompts.yaml` (fallback: `generic-prompts.yaml`).
 Language selection is handled centrally by the app, with support for explicit tags such as `EN`, `ENG`, `ITALIAN`, `ESP`, `FRA`, `DEU`, `JPN`, and many other common aliases.
 
 Both files are read only at startup. The merge order is:
@@ -94,7 +192,7 @@ Both files are read only at startup. The merge order is:
 - legacy `aliases` from `configs/default.yaml`
 - dedicated prompt files, which win on conflicts
 
-Example `prompt-tags.yaml`:
+Example `configs/prompts/prompt-tags.yaml`:
 
 ```yaml
 tags:
@@ -103,7 +201,7 @@ tags:
   SHORT: "Keep the final result short and concise."
 ```
 
-Example `generic-prompts.yaml`:
+Example `configs/prompts/generic-prompts.yaml`:
 
 ```yaml
 tags:
@@ -120,7 +218,7 @@ The old `aliases` section in the main config is still supported as a legacy fall
 
 The fastest way to adapt `armando` to your workflow is to customize the prompt preset files.
 
-Use `prompt-tags.yaml` for rewrite-oriented tags that modify how an existing text should be transformed:
+Use `configs/prompts/prompt-tags.yaml` for rewrite-oriented tags that modify how an existing text should be transformed:
 
 ```yaml
 tags:
@@ -129,7 +227,7 @@ tags:
   SHORT: "Keep the final result short and concise."
 ```
 
-Use `generic-prompts.yaml` for direct-question presets that should inject a reusable instruction block:
+Use `configs/prompts/generic-prompts.yaml` for direct-question presets that should inject a reusable instruction block:
 
 ```yaml
 tags:
@@ -185,15 +283,15 @@ The settings panel centralizes the most important runtime controls and checks:
 System-level shortcuts are supported on Linux, macOS, and Windows.
 The release bundle does not yet provide one built-in universal global hotkey that registers itself identically on every OS, so shortcut setup is still delegated to the operating system.
 
-Use [`SHORTCUTS.md`](SHORTCUTS.md) for the practical setup steps.
+Use [`/docs/guides/shortcuts.md`](/docs/guides/shortcuts.md) for the practical setup steps.
 
 ## Public Docs
 
-- Install and first setup: [`INSTALL.md`](INSTALL.md)
-- Keyboard shortcuts: [`SHORTCUTS.md`](SHORTCUTS.md)
-- Releases, versions, and artifacts: [`RELEASES.md`](RELEASES.md)
-- Visual regression checklist: [`VISUAL_REGRESSION.md`](VISUAL_REGRESSION.md)
-- Repository map: [`STRUCTURE.md`](STRUCTURE.md)
+- Install and first setup: [`/docs/getting-started/install.md`](/docs/getting-started/install.md)
+- Keyboard shortcuts: [`/docs/guides/shortcuts.md`](/docs/guides/shortcuts.md)
+- Releases, versions, and artifacts: [`/docs/guides/releases.md`](/docs/guides/releases.md)
+- Visual regression checklist: [`/docs/qa/visual-regression.md`](/docs/qa/visual-regression.md)
+- Repository map: [`/docs/reference/repository-structure.md`](/docs/reference/repository-structure.md)
 
 ## Local Validation
 
@@ -203,7 +301,7 @@ To run the same Linux container flow locally:
 
 ```bash
 docker build -f docker/test-runner.Dockerfile -t armando-test-runner .
-docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/run-container-tests.sh
+docker run --rm -v "$(pwd):/workspace" -w /workspace armando-test-runner bash scripts/ci/run-container-tests.sh
 ```
 
 This produces logs under `target/test-artifacts/` and a Linux bundle under `target/dist/`.

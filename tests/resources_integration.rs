@@ -70,7 +70,8 @@ strings:
     assert_eq!(i18n.code(), "it");
     assert_eq!(i18n.language_name(), "Italiano");
     assert_eq!(i18n.tr("hello"), "Ciao");
-    assert_eq!(i18n.tr("fallback_only"), "Fallback text");
+    assert_eq!(i18n.tr("app.settings"), "Settings");
+    assert_eq!(i18n.tr("fallback_only"), "fallback_only");
     assert_eq!(i18n.tr("missing_key"), "missing_key");
 
     std::env::set_current_dir(previous_dir).unwrap();

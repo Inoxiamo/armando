@@ -1,3 +1,5 @@
+# Legacy fallback location. Preferred: configs/prompts/generic-prompts.yaml
+# Legacy fallback location. Preferred: configs/prompts/generic-prompts.yaml
 tags:
   CMD:
     instruction: "If the requested answer is a shell command or terminal one-liner, return only the final command, with no Markdown, no backticks, and no extra text."

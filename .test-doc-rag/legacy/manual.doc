@@ -1,0 +1,4 @@
+Legacy document in .doc format (simplified text).
+
+This file verifies extraction fallback for the .doc extension.
+It contains keywords: cosine, embedding, chunk_size, max_retrieved_docs.

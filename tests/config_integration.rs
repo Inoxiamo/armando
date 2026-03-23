@@ -1,5 +1,5 @@
 use armando::app_paths;
-use armando::config::Config;
+use armando::config::{Config, RagMode};
 
 mod support;
 
@@ -76,7 +76,7 @@ fn config_load_falls_back_to_built_in_defaults_when_config_is_missing() {
 
     let config = Config::load().unwrap();
     assert_eq!(config.loaded_from, None);
-    assert_eq!(config.default_backend, "ollama");
+    assert_eq!(config.default_backend, "gemini");
     assert!(config.auto_read_selection);
     assert_eq!(config.theme.name, "default-dark");
     assert_eq!(config.ui.language, "en");
@@ -228,4 +228,39 @@ fn bundled_profile_templates_are_discovered_and_loadable() {
     assert_eq!(beta.ui.language, "en");
     assert!(beta.logging.enabled);
     assert!(!beta.history.enabled);
+}
+
+#[test]
+fn config_save_roundtrips_rag_mode() {
+    let _guard = support::test_lock();
+    let temp_dir = support::unique_temp_dir("config-rag-roundtrip");
+    let config_path = temp_dir.join("config.yaml");
+    std::fs::write(
+        &config_path,
+        "\
+default_backend: ollama
+rag:
+  enabled: true
+  mode: keyword
+",
+    )
+    .unwrap();
+
+    let previous = std::env::var_os("ARMANDO_CONFIG");
+    std::env::set_var("ARMANDO_CONFIG", &config_path);
+
+    let mut config = Config::load().unwrap();
+    assert_eq!(config.rag.mode, RagMode::Keyword);
+
+    config.rag.mode = RagMode::Hybrid;
+    config.save().unwrap();
+
+    let reloaded = Config::load().unwrap();
+    assert_eq!(reloaded.rag.mode, RagMode::Hybrid);
+
+    match previous {
+        Some(value) => std::env::set_var("ARMANDO_CONFIG", value),
+        None => std::env::remove_var("ARMANDO_CONFIG"),
+    }
+    support::remove_dir_all_if_exists(&temp_dir);
 }

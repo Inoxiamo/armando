@@ -14,6 +14,12 @@ Work should be proposed and executed two items at a time.
 - [x] Clearer runtime status and recovery messaging for backend state, persistence, and failure handling
 - [x] Backend HTTP fault-injection coverage for queries, model lookup, and malformed/error responses
 
+### Phase 2 Follow-ups
+
+- [ ] Finish the remaining `src/backends/mod.rs` wiring after extracting `health.rs` and `models.rs`
+- [ ] Finish the GUI module wiring around `settings_panel`, `history_panel`, `provider_settings`, and `rag_settings`
+- [ ] Keep Phase 2 merges gated by `cargo fmt`, `cargo test`, and the current UI smoke checklist
+
 ## Milestone 0.1 - Working Core
 
 - [x] Minimal desktop UI in Rust/egui
@@ -66,6 +72,7 @@ Work should be proposed and executed two items at a time.
 - [ ] Beta tools panel covering `terminal`, `CLI`, `MCP`, and AI backend status
 - [ ] Beta tool and command output with logs and execution state
 - [ ] Beta sandbox UX with explicit confirmation before sensitive actions
+- [x] RAG retrieval modes (`keyword`, `vector`, `hybrid`) with configurable embedding backend/model and settings-panel controls
 
 ## Milestone 1.0 - Distribution
 
@@ -81,7 +88,7 @@ Work should be proposed and executed two items at a time.
 
 ## Future Exploration Queue
 
-- [ ] RAG support for retrieving product docs, roadmap notes, and release context before making larger changes
 - [ ] MCP integration for safe external tools with explicit user confirmation and clear execution logs
 - [ ] Agent workflow for delegated work, parent-agent recaps, and push gating before release-ready changes
 - [ ] Review how RAG, MCP, and Agent support fit alongside the existing vibe-coding workflow and manual double-check process
+- [ ] Add optional reranking strategy for hybrid retrieval (BM25 + embedding fusion tuning)

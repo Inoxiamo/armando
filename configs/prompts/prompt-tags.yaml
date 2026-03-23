@@ -1,0 +1,13 @@
+# Legacy fallback location. Preferred: configs/prompts/prompt-tags.yaml
+tags:
+  GMAIL: "Write or rewrite the text as a professional, clear, and natural email."
+  EMAIL: "Write or rewrite the text as a professional, clear, and natural email."
+  MAIL: "Write or rewrite the text as a professional, clear, and natural email."
+  SLACK: "Write or rewrite the text as a short, natural, action-oriented Slack message."
+  WHATSAPP: "Write or rewrite the text as a direct, simple, conversational WhatsApp message."
+  FORMAL: "Use a formal and professional tone."
+  CASUAL: "Use an informal and natural tone."
+  WORK: "Keep the output professional and work-oriented."
+  SHORT: "Keep the final result short and concise."
+  LONG: "You may be more complete, but stay direct and useful."
+  CMD: "Shape the final output as an executable command or command-oriented result."

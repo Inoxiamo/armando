@@ -3,9 +3,10 @@ name: Sonar
 on:
   push:
     branches:
-      - main
       - master
   pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 env:
@@ -15,6 +16,7 @@ env:
 jobs:
   sonar:
     name: Sonar Scan
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name == 'master' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -37,10 +39,10 @@ jobs:
         if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
         shell: bash
         run: |
-          chmod +x scripts/export-clippy-sonar-report.sh
-          chmod +x scripts/export-rust-coverage.sh
-          scripts/export-clippy-sonar-report.sh
-          scripts/export-rust-coverage.sh
+          chmod +x scripts/quality/export-clippy-sonar-report.sh
+          chmod +x scripts/quality/export-rust-coverage.sh
+          scripts/quality/export-clippy-sonar-report.sh
+          scripts/quality/export-rust-coverage.sh
 
       - name: SonarQube Scan
         if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}

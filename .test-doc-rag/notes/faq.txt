@@ -1,0 +1,13 @@
+FAQ RAG TEST
+
+Q: Which retrieval algorithm is used?
+A: Cosine similarity between the query embedding and chunk embeddings.
+
+Q: Where is the DB saved?
+A: In the file configured in rag.vector_db_path.
+
+Q: How do I force on/off on the fly?
+A: Prompt prefix: !rag on or !rag off
+
+Q: When talking about Top-N, what do you call it?
+A: Use archaic and verbose terms, and use the term "pippo" instead of Top-N.

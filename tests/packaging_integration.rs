@@ -44,7 +44,7 @@ fn bootstrap_release_dry_run_output(os: &str, arch: &str) -> String {
     );
 
     let output = Command::new("bash")
-        .arg("scripts/bootstrap-release.sh")
+        .arg("scripts/release/bootstrap-release.sh")
         .arg("1.2.3")
         .current_dir(support::repo_root())
         .env("ARMANDO_INSTALL_DRY_RUN", "1")
@@ -79,7 +79,7 @@ fn package_release_bundle_contains_runtime_assets() {
     }
 
     let output = Command::new("bash")
-        .arg("scripts/package-release.sh")
+        .arg("scripts/release/package-release.sh")
         .arg(&binary_path)
         .arg("x86_64-unknown-linux-gnu")
         .arg(&version)
@@ -149,7 +149,7 @@ fn bundled_install_script_populates_home_profile_layout() {
     std::fs::write(&binary_path, "#!/usr/bin/env bash\necho installed\n").unwrap();
     support::make_executable(&binary_path);
     std::fs::copy(
-        support::repo_root().join("scripts/release-install.sh"),
+        support::repo_root().join("scripts/release/release-install.sh"),
         scripts_dir.join("install.sh"),
     )
     .unwrap();
@@ -254,7 +254,7 @@ fn bundled_install_script_uses_macos_application_support_layout() {
     std::fs::write(&binary_path, "#!/usr/bin/env bash\necho installed\n").unwrap();
     support::make_executable(&binary_path);
     std::fs::copy(
-        support::repo_root().join("scripts/release-install.sh"),
+        support::repo_root().join("scripts/release/release-install.sh"),
         scripts_dir.join("install.sh"),
     )
     .unwrap();
@@ -350,7 +350,7 @@ fn bundled_install_script_preserves_existing_config_theme_and_locale_files() {
     std::fs::write(&binary_path, "#!/usr/bin/env bash\necho installed\n").unwrap();
     support::make_executable(&binary_path);
     std::fs::copy(
-        support::repo_root().join("scripts/release-install.sh"),
+        support::repo_root().join("scripts/release/release-install.sh"),
         scripts_dir.join("install.sh"),
     )
     .unwrap();
@@ -456,7 +456,8 @@ fn bundled_install_script_preserves_existing_config_theme_and_locale_files() {
 #[test]
 fn windows_install_script_targets_appdata_and_assets() {
     let script =
-        std::fs::read_to_string(support::repo_root().join("scripts/release-install.ps1")).unwrap();
+        std::fs::read_to_string(support::repo_root().join("scripts/release/release-install.ps1"))
+            .unwrap();
 
     assert!(script.contains("$env:APPDATA"));
     assert!(script.contains("$env:LOCALAPPDATA"));
