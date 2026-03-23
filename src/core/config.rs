@@ -575,19 +575,21 @@ rag:
         std::env::set_var("ARMANDO_GEMINI_API_KEY", "from-env-gemini");
         std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "from-env-claude");
 
-        let mut config = Config::default();
-        config.chatgpt = Some(ChatGptConfig {
-            api_key: "from-file-openai".to_string(),
-            model: "gpt-4o-mini".to_string(),
-        });
-        config.gemini = Some(GeminiConfig {
-            api_key: "from-file-gemini".to_string(),
-            model: "gemini-1.5-flash".to_string(),
-        });
-        config.claude = Some(ClaudeConfig {
-            api_key: "from-file-claude".to_string(),
-            model: "claude-3-5-sonnet-latest".to_string(),
-        });
+        let mut config = Config {
+            chatgpt: Some(ChatGptConfig {
+                api_key: "from-file-openai".to_string(),
+                model: "gpt-4o-mini".to_string(),
+            }),
+            gemini: Some(GeminiConfig {
+                api_key: "from-file-gemini".to_string(),
+                model: "gemini-1.5-flash".to_string(),
+            }),
+            claude: Some(ClaudeConfig {
+                api_key: "from-file-claude".to_string(),
+                model: "claude-3-5-sonnet-latest".to_string(),
+            }),
+            ..Default::default()
+        };
 
         apply_env_overrides(&mut config);
 
@@ -629,8 +631,10 @@ rag:
         std::fs::create_dir_all(&temp_dir).unwrap();
         let path = temp_dir.join("default.yaml");
 
-        let mut config = Config::default();
-        config.loaded_from = Some(path.clone());
+        let mut config = Config {
+            loaded_from: Some(path.clone()),
+            ..Default::default()
+        };
         apply_env_overrides(&mut config);
         config.save().unwrap();
 
@@ -692,8 +696,10 @@ rag:
         std::fs::create_dir_all(&temp_dir).unwrap();
         let path = temp_dir.join("default.yaml");
 
-        let mut config = Config::default();
-        config.loaded_from = Some(path.clone());
+        let mut config = Config {
+            loaded_from: Some(path.clone()),
+            ..Default::default()
+        };
         apply_env_overrides(&mut config);
         config.save().unwrap();
 
