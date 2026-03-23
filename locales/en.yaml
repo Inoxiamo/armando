@@ -141,6 +141,8 @@ strings:
   settings.ollama_url: "Ollama base URL"
   settings.ollama_url_hint: "Example: http://localhost:11434 or http://localhost:1143"
   settings.ollama_model: "Ollama model"
+  settings.ollama_model: "Ollama model"
+  settings.pulling: "Pulling..."
   settings.auto_read_selection: "Read selected text automatically"
   settings.update_beta_channel: "[beta] Include RC updates"
   settings.update_beta_channel_hint: "Enabled: update checker can suggest prerelease/RC builds. Disabled: only stable releases."

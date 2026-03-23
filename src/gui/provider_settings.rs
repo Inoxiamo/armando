@@ -251,11 +251,16 @@ fn provider_settings_section(
                 ));
             }
 
+            let is_pulling = app.async_pull_status.lock().unwrap().contains_key(provider);
+            let pull_status = app.async_pull_status.lock().unwrap().get(provider).cloned();
+            let pulling_label = app.tr("settings.pulling");
+
             let model_state = app
                 .provider_model_states
                 .entry(provider.to_string())
                 .or_default();
-            let (model_changed, model_interacted) = settings_model_field(
+
+            let (model_changed, model_interacted, should_pull) = settings_model_field(
                 ui,
                 theme,
                 provider,
@@ -267,9 +272,15 @@ fn provider_settings_section(
                 &loading_models_label,
                 &select_model_label,
                 &models_hint_label,
+                is_pulling,
+                pull_status,
+                &pulling_label,
             );
             changed |= model_changed;
             should_fetch_models = model_interacted && model_state.models.is_empty();
+            if should_pull {
+                app.request_ollama_model_pull(ctx, secondary_value);
+            }
         });
     if should_fetch_models {
         app.request_provider_models(ctx, provider);
@@ -290,63 +301,151 @@ fn settings_model_field(
     loading_label: &str,
     select_model_label: &str,
     models_hint_label: &str,
-) -> (bool, bool) {
+    is_pulling: bool,
+    pull_status: Option<(String, Option<f32>)>,
+    pulling_label: &str,
+) -> (bool, bool, bool) {
     let mut changed = false;
     let mut should_fetch = false;
+    let mut should_pull = false;
 
     ui.add_space(8.0);
-    ui.label(super::muted_label(label, theme.weak_text_color));
+    ui.horizontal(|ui| {
+        ui.label(super::muted_label(label, theme.weak_text_color));
+        if provider == "ollama" {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let button_label = if state.is_loading {
+                    loading_label
+                } else {
+                    refresh_label
+                };
+                if ui
+                    .add_enabled(
+                        !state.is_loading,
+                        super::secondary_action_button(button_label, theme.panel_fill_soft),
+                    )
+                    .clicked()
+                {
+                    state.models.clear();
+                    state.last_error = None;
+                    should_fetch = true;
+                }
+            });
+        }
+    });
+
     let response = ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
     changed |= response.changed();
     should_fetch |= response.clicked() || response.gained_focus() || response.has_focus();
 
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label(super::muted_label(
-            available_models_label,
-            theme.weak_text_color,
-        ));
-        let button_label = if state.is_loading {
-            loading_label
-        } else {
-            refresh_label
-        };
-        if ui
-            .add_enabled(
-                !state.is_loading,
-                super::secondary_action_button(button_label, theme.panel_fill_soft),
-            )
-            .clicked()
-        {
-            state.models.clear();
-            state.last_error = None;
-            should_fetch = true;
+    if provider != "ollama" {
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(super::muted_label(
+                available_models_label,
+                theme.weak_text_color,
+            ));
+            let button_label = if state.is_loading {
+                loading_label
+            } else {
+                refresh_label
+            };
+            if ui
+                .add_enabled(
+                    !state.is_loading,
+                    super::secondary_action_button(button_label, theme.panel_fill_soft),
+                )
+                .clicked()
+            {
+                state.models.clear();
+                state.last_error = None;
+                should_fetch = true;
+            }
+        });
+    }
+
+    if provider == "ollama" {
+        if is_pulling {
+            let (status, percentage) = pull_status.unwrap_or_default();
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(pulling_label)
+                        .small()
+                        .color(theme.accent_color),
+                );
+                ui.label(
+                    egui::RichText::new(&status)
+                        .small()
+                        .color(theme.weak_text_color),
+                );
+            });
+            if let Some(p) = percentage {
+                ui.add(egui::ProgressBar::new(p));
+            }
         }
-    });
+    }
 
     if state.is_loading {
         ui.label(super::muted_label(loading_label, theme.weak_text_color));
-    } else if !state.models.is_empty() {
+    } else if !state.models.is_empty() || provider == "ollama" {
         let selected_text = if value.trim().is_empty() {
             select_model_label.to_string()
         } else {
             value.clone()
         };
-        super::dropdown_box_scope(ui, theme, |ui| {
-            egui::ComboBox::from_id_source(format!("{provider}_available_models"))
-                .selected_text(super::dropdown_button_text(&selected_text, theme))
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    super::apply_dropdown_menu_style(ui, theme);
-                    for model in &state.models {
-                        if ui.selectable_value(value, model.clone(), model).changed() {
-                            changed = true;
+
+        let filter = value.to_lowercase();
+        let mut suggestions = Vec::new();
+
+        // Add local models
+        for m in &state.models {
+            if m.to_lowercase().contains(&filter) || filter.is_empty() {
+                suggestions.push((m.clone(), false));
+            }
+        }
+
+        // Add remote models if Ollama
+        if provider == "ollama" {
+            for &m in super::POPULAR_OLLAMA_MODELS {
+                if (m.to_lowercase().contains(&filter) || filter.is_empty())
+                    && !state.models.iter().any(|local| local == m)
+                {
+                    suggestions.push((m.to_string(), true));
+                }
+            }
+        }
+
+        if !suggestions.is_empty() {
+            super::dropdown_box_scope(ui, theme, |ui| {
+                egui::ComboBox::from_id_source(format!("{provider}_available_models"))
+                    .selected_text(super::dropdown_button_text(&selected_text, theme))
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        super::apply_dropdown_menu_style(ui, theme);
+                        for (model_name, is_remote) in suggestions {
+                            let label = if is_remote {
+                                format!("{model_name} ↓")
+                            } else {
+                                model_name.clone()
+                            };
+                            if ui
+                                .selectable_value(value, model_name.clone(), label)
+                                .changed()
+                            {
+                                changed = true;
+                                if is_remote {
+                                    should_pull = true;
+                                }
+                            }
                         }
-                    }
-                });
-        });
+                    });
+            });
+        }
     } else {
-        ui.label(super::muted_label(models_hint_label, theme.weak_text_color));
+        if provider != "ollama" {
+            ui.label(super::muted_label(models_hint_label, theme.weak_text_color));
+        }
     }
 
     if let Some(error) = &state.last_error {
@@ -354,7 +453,7 @@ fn settings_model_field(
         ui.label(super::muted_label(models_hint_label, theme.weak_text_color));
     }
 
-    (changed, should_fetch)
+    (changed, should_fetch, should_pull)
 }
 
 fn provider_credit_label(app: &AiPopupApp, provider: &str) -> String {

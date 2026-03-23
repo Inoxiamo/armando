@@ -130,6 +130,72 @@ pub(crate) async fn embed_at(base_url: &str, model: &str, text: &str) -> Result<
     Ok(embedding)
 }
 
+pub async fn pull_model(
+    base_url: &str,
+    model: &str,
+    progress: ResponseProgressSink,
+) -> Result<()> {
+    let url = format!("{}/api/pull", base_url.trim_end_matches('/'));
+    let payload = json!({
+        "name": model,
+        "stream": true
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3600)) // Long timeout for large models
+        .build()?;
+
+    let mut response = client.post(&url).json(&payload).send().await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!(ollama_error_message(response.status())));
+    }
+
+    let mut buffer = String::new();
+    while let Some(chunk) = response.chunk().await? {
+        buffer.push_str(
+            std::str::from_utf8(&chunk)
+                .map_err(|err| anyhow!("Invalid UTF-8 in Ollama pull stream: {err}"))?,
+        );
+
+        while let Some(newline_index) = buffer.find('\n') {
+            let line = buffer[..newline_index].trim().to_string();
+            buffer.drain(..=newline_index);
+
+            if line.is_empty() {
+                continue;
+            }
+
+            let value: serde_json::Value = serde_json::from_str(&line)?;
+            let status = value
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Pulling...")
+                .to_string();
+            let completed = value.get("completed").and_then(|v| v.as_f64());
+            let total = value.get("total").and_then(|v| v.as_f64());
+
+            let percentage = if let (Some(c), Some(t)) = (completed, total) {
+                if t > 0.0 {
+                    Some((c / t) as f32)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            progress(ResponseProgress::PullStatus(status, percentage));
+
+            if value.get("status").and_then(|v| v.as_str()) == Some("success") {
+                return Ok(());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn stream_ollama_response(
     mut response: reqwest::Response,
     progress: ResponseProgressSink,

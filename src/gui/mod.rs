@@ -31,6 +31,20 @@ mod startup_health;
 mod update_status;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const POPULAR_OLLAMA_MODELS: &[&str] = &[
+    "llama3", "llama3:8b", "llama3:70b", "llama2", "llama2:13b", "llama2:70b",
+    "mistral", "mixtral", "mixtral:8x7b", "mixtral:8x22b",
+    "phi3", "phi3:mini", "phi3:medium",
+    "gemma", "gemma:2b", "gemma:7b",
+    "codellama", "codegemma",
+    "command-r", "command-r-plus",
+    "llava", "llava:7b", "llava:13b", "llava:34b",
+    "minicpm-v", "moondream", "neural-chat", "starling-lm",
+    "deepseek-coder", "deepseek-coder-v2", "deepseek-llm",
+    "nomic-embed-text", "mxbai-embed-large",
+    "qwen", "qwen2", "stable-beluga", "tinyllama", "vicuna", "wizardlm2", "zephyr",
+    "starcoder2", "dbrx", "dolphin-mistral", "dolphin-mixtral",
+];
 
 fn display_version() -> String {
     APP_VERSION.to_string()
@@ -452,6 +466,8 @@ pub struct AiPopupApp {
     async_response_chunks: Arc<Mutex<Vec<String>>>,
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
     async_available_models: AsyncAvailableModels,
+    async_pull_results: Arc<Mutex<Vec<(String, Result<(), String>)>>>,
+    async_pull_status: Arc<Mutex<HashMap<String, (String, Option<f32>)>>>,
     async_release_check: AsyncReleaseCheck,
     async_rag_index: Arc<Mutex<Option<Result<IndexStats, String>>>>,
     release_check_state: ReleaseCheckState,
@@ -553,6 +569,8 @@ impl AiPopupApp {
             async_response_chunks: Arc::new(Mutex::new(Vec::new())),
             async_dictation: Arc::new(Mutex::new(None)),
             async_available_models: Arc::new(Mutex::new(Vec::new())),
+            async_pull_results: Arc::new(Mutex::new(Vec::new())),
+            async_pull_status: Arc::new(Mutex::new(HashMap::new())),
             async_release_check: Arc::new(Mutex::new(None)),
             async_rag_index: Arc::new(Mutex::new(None)),
             release_check_state: ReleaseCheckState::Checking,
@@ -652,7 +670,7 @@ impl AiPopupApp {
         };
 
         for (provider, result) in available_models {
-            let state = self.provider_model_states.entry(provider).or_default();
+            let state = self.provider_model_states.entry(provider.clone()).or_default();
             state.is_loading = false;
             match result {
                 Ok(models) => {
@@ -663,6 +681,25 @@ impl AiPopupApp {
                     state.last_error = Some(error);
                 }
             }
+        }
+
+        let pull_results = {
+            let mut pull_lock = self.async_pull_results.lock().unwrap();
+            std::mem::take(&mut *pull_lock)
+        };
+
+        for (provider, result) in pull_results {
+            if let Some(state) = self.provider_model_states.get_mut(&provider) {
+                state.is_loading = false;
+                if let Err(error) = result {
+                    state.last_error = Some(error);
+                } else {
+                    state.last_error = None;
+                    // Trigger a refresh after successful pull
+                    self.request_provider_models(_ctx, &provider);
+                }
+            }
+            self.async_pull_status.lock().unwrap().remove(&provider);
         }
 
         let release_check = {
@@ -798,6 +835,7 @@ impl AiPopupApp {
                     async_response_chunks.lock().unwrap().push(chunk);
                     progress_ctx.request_repaint();
                 }
+                ResponseProgress::PullStatus(_, _) => {}
             }));
 
         // Spawn async task
@@ -1330,9 +1368,50 @@ impl AiPopupApp {
     fn invalidate_provider_models(&mut self, provider: &str) {
         if let Some(state) = self.provider_model_states.get_mut(provider) {
             state.models.clear();
-            state.is_loading = false;
             state.last_error = None;
         }
+    }
+
+    fn request_ollama_model_pull(&mut self, ctx: &egui::Context, model: &str) {
+        let provider = "ollama";
+        let state = self
+            .provider_model_states
+            .entry(provider.to_string())
+            .or_default();
+        if state.is_loading {
+            return;
+        }
+        state.is_loading = true;
+        state.last_error = None;
+
+        let config = self.config.clone();
+        let provider_name = provider.to_string();
+        let model_name = model.to_string();
+        let async_pull_results = self.async_pull_results.clone();
+        let async_pull_status = self.async_pull_status.clone();
+        let ctx = ctx.clone();
+
+        let progress_ctx = ctx.clone();
+        let progress_sink: ResponseProgressSink =
+            Arc::new(move |event: ResponseProgress| match event {
+                ResponseProgress::PullStatus(status, percentage) => {
+                    async_pull_status
+                        .lock()
+                        .unwrap()
+                        .insert("ollama".to_string(), (status, percentage));
+                    progress_ctx.request_repaint();
+                }
+                _ => {}
+            });
+
+        self.runtime.spawn(async move {
+            let result = backends::pull_ollama_model(&model_name, &config, progress_sink).await;
+            async_pull_results
+                .lock()
+                .unwrap()
+                .push((provider_name, result));
+            ctx.request_repaint();
+        });
     }
 
     fn refresh_toolbar_icon_textures_if_needed(&mut self, ctx: &egui::Context) {

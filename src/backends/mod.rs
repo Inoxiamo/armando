@@ -67,9 +67,10 @@ pub struct HealthCheck {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResponseProgress {
     Chunk(String),
+    PullStatus(String, Option<f32>),
 }
 
 pub type ResponseProgressSink = Arc<dyn Fn(ResponseProgress) + Send + Sync>;
@@ -162,6 +163,21 @@ pub fn startup_clipboard_tools_health_check_for(
 
 pub async fn fetch_available_models(backend: &str, config: &Config) -> Result<Vec<String>, String> {
     models::fetch_available_models(backend, config).await
+}
+
+pub async fn pull_ollama_model(
+    model: &str,
+    config: &Config,
+    progress: ResponseProgressSink,
+) -> Result<(), String> {
+    let ollama = config
+        .ollama
+        .as_ref()
+        .ok_or_else(|| "Ollama is not configured.".to_string())?;
+
+    ollama::pull_model(&ollama.base_url, model, progress)
+        .await
+        .map_err(|err| err.to_string())
 }
 
 fn prepare_prompt(
