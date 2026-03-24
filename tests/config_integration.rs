@@ -1,5 +1,5 @@
 use armando::app_paths;
-use armando::config::{Config, RagMode};
+use armando::config::{Config, RagEngine, RagMode};
 
 mod support;
 
@@ -241,7 +241,11 @@ fn config_save_roundtrips_rag_mode() {
 default_backend: ollama
 rag:
   enabled: true
+  engine: langchain
   mode: keyword
+  langchain_base_url: http://127.0.0.1:18001
+  langchain_timeout_ms: 5000
+  langchain_retry_count: 2
 ",
     )
     .unwrap();
@@ -250,12 +254,18 @@ rag:
     std::env::set_var("ARMANDO_CONFIG", &config_path);
 
     let mut config = Config::load().unwrap();
+    assert_eq!(config.rag.engine, RagEngine::Langchain);
     assert_eq!(config.rag.mode, RagMode::Keyword);
+    assert_eq!(config.rag.langchain_base_url, "http://127.0.0.1:18001");
+    assert_eq!(config.rag.langchain_timeout_ms, 5_000);
+    assert_eq!(config.rag.langchain_retry_count, 2);
 
     config.rag.mode = RagMode::Hybrid;
+    config.rag.engine = RagEngine::Simple;
     config.save().unwrap();
 
     let reloaded = Config::load().unwrap();
+    assert_eq!(reloaded.rag.engine, RagEngine::Simple);
     assert_eq!(reloaded.rag.mode, RagMode::Hybrid);
 
     match previous {

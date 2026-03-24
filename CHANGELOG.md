@@ -7,6 +7,7 @@
 - optimized RAG context size with 8000-character truncation limit to improve prompt performance
 - refined "Generic Question" mode by minimizing system instructions for a "pure" prompt experience
 - improved Ollama suggestions with an expanded list of popular library models
+- temporarily disabled LangChain selection in the RAG UI and added an in-app availability notice
 
 ## v0.0.2-rc3 - 2026-03-22
 

@@ -8,6 +8,8 @@ pub mod embedding;
 pub mod gemini;
 #[path = "ops/health.rs"]
 pub mod health;
+#[path = "pipeline/langchain.rs"]
+mod langchain;
 #[path = "catalog/models.rs"]
 pub mod models;
 #[path = "providers/ollama.rs"]
@@ -18,10 +20,12 @@ pub mod prompt;
 mod query_flow;
 
 use crate::config::Config;
+use crate::config::RagEngine;
 use crate::history;
 use crate::logging;
 use crate::prompt_profiles::PromptProfiles;
 use crate::rag::RetrievedDocument;
+use crate::rag::{IndexStats, RagSystem};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,14 +89,15 @@ pub async fn query(
 ) -> String {
     let request_id = logging::log_request(config, backend, input);
     let effective_prompt = input.prompt.clone();
-    let retrieved_docs = query_flow::retrieve_docs(backend, &effective_prompt, config).await;
     let prepared_prompt = query_flow::build_prepared_prompt(
+        backend,
         input,
         &effective_prompt,
         prompt_profiles,
         mode,
-        &retrieved_docs,
-    );
+        config,
+    )
+    .await;
     logging::log_prepared_prompt(config, request_id, backend, input, &prepared_prompt);
     let res =
         query_flow::dispatch_backend_query(backend, &prepared_prompt, input, config, progress)
@@ -137,6 +142,40 @@ pub async fn transcribe_wav_audio(wav_bytes: Vec<u8>, config: &Config) -> Result
     chatgpt::transcribe_wav_audio(wav_bytes, config)
         .await
         .map_err(|err| err.to_string())
+}
+
+pub async fn index_rag_documents(backend: &str, config: &Config) -> Result<IndexStats, String> {
+    match config.rag.engine {
+        RagEngine::Simple => {
+            let rag = RagSystem::new(config.rag.clone());
+            rag.index_documents(backend, config)
+                .await
+                .map_err(|err| err.to_string())
+        }
+        RagEngine::Langchain => {
+            let documents_folder = config
+                .rag
+                .documents_folder
+                .as_ref()
+                .ok_or_else(|| {
+                    "RAG documents_folder is required for LangChain indexing".to_string()
+                })?
+                .to_string_lossy()
+                .to_string();
+            let client_config = langchain::LangChainClientConfig {
+                base_url: config.rag.langchain_base_url.clone(),
+                timeout_ms: config.rag.langchain_timeout_ms,
+                retry_count: config.rag.langchain_retry_count,
+            };
+            let request = langchain::LangChainIndexRequest {
+                documents_folder,
+                force_reindex: false,
+            };
+            langchain::index_documents_with_retry(&client_config, &request)
+                .await
+                .map_err(|err| err.to_string())
+        }
+    }
 }
 
 pub fn health_checks(config: &Config) -> Vec<HealthCheck> {
@@ -307,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn generic_question_uses_markdown_by_default() {
+    fn generic_question_uses_minimal_default_instruction_set() {
         let prompt = prepare_prompt(
             "come funziona docker compose?",
             &[],
@@ -317,9 +356,9 @@ mod tests {
             None,
         );
 
-        assert!(prompt.contains("Treat the user's text as a general question or request"));
-        assert!(prompt.contains("Use clear Markdown formatting when it helps readability."));
+        assert!(prompt.contains("Answer the user's request accurately and directly."));
         assert!(prompt.contains("answer in the same language as the user's request"));
+        assert!(!prompt.contains("Use clear Markdown formatting when it helps readability."));
         assert!(!prompt.contains("return only the final command"));
     }
 

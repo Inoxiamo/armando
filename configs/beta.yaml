@@ -14,6 +14,7 @@ update:
   beta: true
 rag:
   enabled: false
+  engine: simple
   mode: vector
   documents_folder: null
   vector_db_path: .armando-rag.sqlite3
@@ -21,6 +22,9 @@ rag:
   chunk_size: 1200
   embedding_backend: null
   embedding_model: null
+  langchain_base_url: http://127.0.0.1:8001
+  langchain_timeout_ms: 8000
+  langchain_retry_count: 1
 gemini:
   api_key: YOUR_GEMINI_API_KEY
   model: gemini-1.5-flash

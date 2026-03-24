@@ -147,7 +147,7 @@ merge_essential_default_config_keys() {
   cp "${destination_path}" "${tmp_file}"
 
   ensure_nested_key "${tmp_file}" "${source_path}" "update" "beta"
-  for key in enabled mode documents_folder vector_db_path max_retrieved_docs chunk_size embedding_backend embedding_model; do
+  for key in enabled engine mode documents_folder vector_db_path max_retrieved_docs chunk_size embedding_backend embedding_model langchain_base_url langchain_timeout_ms langchain_retry_count; do
     ensure_nested_key "${tmp_file}" "${source_path}" "rag" "${key}"
   done
 

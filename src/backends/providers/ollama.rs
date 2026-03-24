@@ -130,11 +130,7 @@ pub(crate) async fn embed_at(base_url: &str, model: &str, text: &str) -> Result<
     Ok(embedding)
 }
 
-pub async fn pull_model(
-    base_url: &str,
-    model: &str,
-    progress: ResponseProgressSink,
-) -> Result<()> {
+pub async fn pull_model(base_url: &str, model: &str, progress: ResponseProgressSink) -> Result<()> {
     let url = format!("{}/api/pull", base_url.trim_end_matches('/'));
     let payload = json!({
         "name": model,

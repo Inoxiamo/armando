@@ -315,7 +315,14 @@ mod tests {
     fn test_generic_question_pure_prompt() {
         let profiles = PromptProfiles::default_built_in();
         let prompt = "How are you?";
-        let prepared = prepare_prompt(prompt, &[], &profiles, PromptMode::GenericQuestion, false, None);
+        let prepared = prepare_prompt(
+            prompt,
+            &[],
+            &profiles,
+            PromptMode::GenericQuestion,
+            false,
+            None,
+        );
 
         // Should contain the minimal instruction and the user request
         assert!(prepared.contains("Answer the user's request accurately and directly."));

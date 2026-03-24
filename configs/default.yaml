@@ -14,7 +14,8 @@ logging:
 update:
   beta: false
 rag:
-  enabled: false
+  enabled: true
+  engine: langchain
   mode: vector
   documents_folder: YOUR_RAG_DOCUMENTS_FOLDER
   vector_db_path: .armando-rag.sqlite3
@@ -22,6 +23,9 @@ rag:
   chunk_size: 128
   embedding_backend: ollama
   embedding_model: nomic-embed-text
+  langchain_base_url: http://127.0.0.1:8001
+  langchain_timeout_ms: 8000
+  langchain_retry_count: 1
 gemini:
   api_key: YOUR_GEMINI_API_KEY
   model: gemini-2.5-flash

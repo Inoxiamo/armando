@@ -15,7 +15,7 @@ use crate::config::Config;
 use crate::history::{self, HistoryEntry};
 use crate::i18n::{available_locales, I18n, LocaleDefinition};
 use crate::prompt_profiles::PromptProfiles;
-use crate::rag::{IndexStats, RagCorpusStats, RagSystem};
+use crate::rag::{IndexStats, RagCorpusStats};
 use crate::theme::{available_theme_names, load_theme_by_name, ResolvedTheme};
 use crate::update::{self, ReleaseInfo};
 use crate::window_context;
@@ -32,18 +32,50 @@ mod update_status;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const POPULAR_OLLAMA_MODELS: &[&str] = &[
-    "llama3", "llama3:8b", "llama3:70b", "llama2", "llama2:13b", "llama2:70b",
-    "mistral", "mixtral", "mixtral:8x7b", "mixtral:8x22b",
-    "phi3", "phi3:mini", "phi3:medium",
-    "gemma", "gemma:2b", "gemma:7b",
-    "codellama", "codegemma",
-    "command-r", "command-r-plus",
-    "llava", "llava:7b", "llava:13b", "llava:34b",
-    "minicpm-v", "moondream", "neural-chat", "starling-lm",
-    "deepseek-coder", "deepseek-coder-v2", "deepseek-llm",
-    "nomic-embed-text", "mxbai-embed-large",
-    "qwen", "qwen2", "stable-beluga", "tinyllama", "vicuna", "wizardlm2", "zephyr",
-    "starcoder2", "dbrx", "dolphin-mistral", "dolphin-mixtral",
+    "llama3",
+    "llama3:8b",
+    "llama3:70b",
+    "llama2",
+    "llama2:13b",
+    "llama2:70b",
+    "mistral",
+    "mixtral",
+    "mixtral:8x7b",
+    "mixtral:8x22b",
+    "phi3",
+    "phi3:mini",
+    "phi3:medium",
+    "gemma",
+    "gemma:2b",
+    "gemma:7b",
+    "codellama",
+    "codegemma",
+    "command-r",
+    "command-r-plus",
+    "llava",
+    "llava:7b",
+    "llava:13b",
+    "llava:34b",
+    "minicpm-v",
+    "moondream",
+    "neural-chat",
+    "starling-lm",
+    "deepseek-coder",
+    "deepseek-coder-v2",
+    "deepseek-llm",
+    "nomic-embed-text",
+    "mxbai-embed-large",
+    "qwen",
+    "qwen2",
+    "stable-beluga",
+    "tinyllama",
+    "vicuna",
+    "wizardlm2",
+    "zephyr",
+    "starcoder2",
+    "dbrx",
+    "dolphin-mistral",
+    "dolphin-mixtral",
 ];
 
 fn display_version() -> String {
@@ -670,7 +702,10 @@ impl AiPopupApp {
         };
 
         for (provider, result) in available_models {
-            let state = self.provider_model_states.entry(provider.clone()).or_default();
+            let state = self
+                .provider_model_states
+                .entry(provider.clone())
+                .or_default();
             state.is_loading = false;
             match result {
                 Ok(models) => {
@@ -775,8 +810,7 @@ impl AiPopupApp {
         let ctx = ctx.clone();
 
         self.runtime.spawn(async move {
-            let rag = RagSystem::new(config.rag.clone());
-            let result = rag.index_documents(&backend, &config).await;
+            let result = backends::index_rag_documents(&backend, &config).await;
             *async_rag_index.lock().unwrap() = Some(result.map_err(|err| err.to_string()));
             ctx.request_repaint();
         });

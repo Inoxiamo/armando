@@ -1,4 +1,4 @@
-use armando::{config, gui, prompt_profiles, theme};
+use armando::{backends, config, gui, prompt_profiles, theme};
 use eframe::{egui, Theme};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -19,9 +19,10 @@ fn main() -> anyhow::Result<()> {
 
 fn run_rag_index(cfg: config::Config) -> anyhow::Result<()> {
     let runtime = Runtime::new()?;
-    let rag = armando::rag::RagSystem::new(cfg.rag.clone());
     let backend = cfg.default_backend.clone();
-    let stats = runtime.block_on(rag.index_documents(&backend, &cfg))?;
+    let stats = runtime
+        .block_on(backends::index_rag_documents(&backend, &cfg))
+        .map_err(anyhow::Error::msg)?;
     println!(
         "RAG indexing completed: {} files, {} chunks (backend: {}).",
         stats.indexed_files, stats.indexed_chunks, backend
