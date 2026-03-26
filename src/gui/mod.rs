@@ -2120,7 +2120,10 @@ impl egui::Widget for IconActionButton {
                 self.stroke_color
             },
         );
-        let prefer_vector = matches!(self.icon, ToolbarIcon::History | ToolbarIcon::HistoryOpen);
+        let prefer_vector = matches!(
+            self.icon,
+            ToolbarIcon::History | ToolbarIcon::HistoryOpen | ToolbarIcon::Copy
+        );
 
         ui.painter()
             .rect(rect, egui::Rounding::same(10.0), fill, egui::Stroke::NONE);
