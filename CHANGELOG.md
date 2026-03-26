@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.0.2-rc5 - 2026-03-26
+
+- added direct CLI query mode with `--ask`, `--stdin`, backend override, and mode selection flags
+- added optional `--json` CLI output for shell scripts and automation
+- added automatic switch to generic-question mode via `GENERIC:` prompt tag
+- optimized prompt instruction payload to reduce token usage while preserving language behavior
+- improved language handling: keep original/request language by default, change only on explicit translation intent
+- optimized GitHub Actions with workflow concurrency cancellation and Rust cache steps
+- reduced `tokio` dependency footprint by replacing `full` feature set with minimal required features
+
 ## v0.0.2-rc4 - 2026-03-23
 
 - added dynamic Ollama model selection with search-as-you-type autocomplete and automatic pull support

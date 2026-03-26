@@ -6,7 +6,7 @@ This page explains how `armando` versions, tags, and release artifacts are organ
 
 - the application version lives in [`Cargo.toml`](Cargo.toml)
 - the Git tag format is `v<version>`
-- example: crate version `0.0.2-rc3` maps to tag `v0.0.2-rc3`
+- example: crate version `0.0.2-rc5` maps to tag `v0.0.2-rc5`
 
 ## Downloading A Release
 
@@ -32,8 +32,8 @@ Pass a version as the first argument or set `ARMANDO_INSTALL_VERSION=<version>` 
 Typical flow:
 
 ```bash
-git commit -am "release: prepare v0.0.2-rc3"
-git tag v0.0.2-rc3
+git commit -am "release: prepare v0.0.2-rc5"
+git tag v0.0.2-rc5
 git push origin master --tags
 ```
 
@@ -83,7 +83,7 @@ Before publishing a version, the repository can validate:
 Local command:
 
 ```bash
-bash scripts/release/pre-release-check.sh v0.0.2-rc3
+bash scripts/release/pre-release-check.sh v0.0.2-rc5
 ```
 
 Optional local Sonar smoke test:

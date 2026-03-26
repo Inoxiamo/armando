@@ -9,6 +9,10 @@ on:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: sonar-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
   SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -34,6 +38,10 @@ jobs:
         uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy, llvm-tools-preview
+
+      - name: Cache Rust build artifacts
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
+        uses: Swatinem/rust-cache@v2
 
       - name: Generate clippy and coverage reports
         if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}

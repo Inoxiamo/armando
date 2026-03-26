@@ -67,6 +67,10 @@ Work should be proposed and executed two items at a time.
 
 ## Milestone 0.5 - Beta Integrations
 
+
+- [x] Allow use command inside terminal and CLI mode
+- [x] Automatic switch from standard to general question mode with the prompt tag `GENERIC`
+- [x] Optimize the prepromt to use the text language of the reqeust, if not explicitly set into the preprompt (Optimize token gestion and cost)
 - [ ] Beta terminal mode with proposed command plus explicit user confirmation
 - [ ] Beta MCP client integration for tools and external context
 - [ ] Beta tools panel covering `terminal`, `CLI`, `MCP`, and AI backend status
