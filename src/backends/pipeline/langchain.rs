@@ -188,9 +188,7 @@ async fn build_http_error(operation: &str, response: reqwest::Response) -> Strin
     if error_message.is_empty() {
         format!("LangChain {operation} request failed with HTTP {status}")
     } else {
-        format!(
-            "LangChain {operation} request failed with HTTP {status}: {error_message}"
-        )
+        format!("LangChain {operation} request failed with HTTP {status}: {error_message}")
     }
 }
 
