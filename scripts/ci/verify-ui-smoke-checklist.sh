@@ -14,5 +14,5 @@ declare -a TESTS=(
 )
 
 for test_name in "${TESTS[@]}"; do
-  cargo test "${test_name}" -- --nocapture
+  cargo test --locked "${test_name}" -- --nocapture
 done

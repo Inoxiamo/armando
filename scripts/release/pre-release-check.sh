@@ -14,7 +14,7 @@ if [[ -n "${TAG_NAME}" ]]; then
 fi
 
 cargo fmt --all -- --check
-cargo test --all-targets
-cargo clippy --all-targets -- -D warnings
+cargo test --locked --all-targets
+cargo clippy --locked --all-targets -- -D warnings
 bash scripts/quality/export-clippy-sonar-report.sh
 bash scripts/quality/export-rust-coverage.sh
