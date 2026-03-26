@@ -1429,16 +1429,15 @@ impl AiPopupApp {
         let ctx = ctx.clone();
 
         let progress_ctx = ctx.clone();
-        let progress_sink: ResponseProgressSink =
-            Arc::new(move |event: ResponseProgress| {
-                if let ResponseProgress::PullStatus(status, percentage) = event {
-                    async_pull_status
-                        .lock()
-                        .unwrap()
-                        .insert("ollama".to_string(), (status, percentage));
-                    progress_ctx.request_repaint();
-                }
-            });
+        let progress_sink: ResponseProgressSink = Arc::new(move |event: ResponseProgress| {
+            if let ResponseProgress::PullStatus(status, percentage) = event {
+                async_pull_status
+                    .lock()
+                    .unwrap()
+                    .insert("ollama".to_string(), (status, percentage));
+                progress_ctx.request_repaint();
+            }
+        });
 
         self.runtime.spawn(async move {
             let result = backends::pull_ollama_model(&model_name, &config, progress_sink).await;

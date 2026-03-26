@@ -397,11 +397,7 @@ impl RagSystem {
                 chunk_size: self.config.chunk_size,
                 index_keyword: prepared.store_keyword_index,
             };
-            persist_chunk(
-                &tx,
-                &retrieval_scope,
-                &persist_input,
-            )?;
+            persist_chunk(&tx, &retrieval_scope, &persist_input)?;
         }
         tx.commit()?;
         Ok(())
