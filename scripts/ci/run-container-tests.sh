@@ -17,7 +17,7 @@ mkdir -p "${ARTIFACT_DIR}" "${DIST_DIR}"
 
 cargo fmt --all -- --check 2>&1 | tee "${ARTIFACT_DIR}/cargo-fmt.log"
 cargo test --locked --all-targets -- --nocapture 2>&1 | tee "${ARTIFACT_DIR}/cargo-test.log"
-bash "${ROOT_DIR}/scripts/ci/verify-ui-smoke-checklist.sh" 2>&1 | tee "${ARTIFACT_DIR}/ui-smoke-checklist.log"
+bash "${ROOT_DIR}/scripts/ci/verify-ui-smoke-checklist.sh" "${ARTIFACT_DIR}/cargo-test.log" 2>&1 | tee "${ARTIFACT_DIR}/ui-smoke-checklist.log"
 cargo clippy --locked --all-targets -- -D warnings 2>&1 | tee "${ARTIFACT_DIR}/cargo-clippy.log"
 bash "${ROOT_DIR}/scripts/quality/export-clippy-sonar-report.sh" 2>&1 | tee "${ARTIFACT_DIR}/export-clippy-sonar.log"
 bash "${ROOT_DIR}/scripts/quality/export-rust-coverage.sh" 2>&1 | tee "${ARTIFACT_DIR}/export-rust-coverage.log"
