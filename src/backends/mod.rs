@@ -24,7 +24,6 @@ use crate::config::RagEngine;
 use crate::history;
 use crate::logging;
 use crate::prompt_profiles::PromptProfiles;
-use crate::rag::RetrievedDocument;
 use crate::rag::{IndexStats, RagSystem};
 use std::sync::Arc;
 
@@ -262,6 +261,7 @@ pub async fn pull_ollama_model(
         .map_err(|err| err.to_string())
 }
 
+#[cfg(test)]
 fn prepare_prompt(
     prompt: &str,
     conversation: &[ConversationTurn],
@@ -277,26 +277,6 @@ fn prepare_prompt(
         mode,
         has_images,
         active_window_context,
-    )
-}
-
-fn prepare_prompt_with_retrieval(
-    prompt: &str,
-    conversation: &[ConversationTurn],
-    prompt_profiles: &PromptProfiles,
-    mode: PromptMode,
-    has_images: bool,
-    active_window_context: Option<&str>,
-    retrieved_docs: &[RetrievedDocument],
-) -> String {
-    prompt::prepare_prompt_with_retrieval(
-        prompt,
-        conversation,
-        prompt_profiles,
-        mode,
-        has_images,
-        active_window_context,
-        retrieved_docs,
     )
 }
 

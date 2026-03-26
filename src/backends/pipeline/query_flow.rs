@@ -4,8 +4,8 @@ use crate::rag::{RagSystem, RetrievedDocument};
 use anyhow::{anyhow, Result};
 
 use super::{
-    chatgpt, claude, gemini, langchain, ollama, prepare_prompt, prepare_prompt_with_retrieval,
-    PromptMode, QueryInput, ResponseProgressSink,
+    chatgpt, claude, gemini, langchain, ollama, prompt, PromptMode, QueryInput,
+    ResponseProgressSink,
 };
 
 pub(super) async fn build_prepared_prompt(
@@ -67,7 +67,7 @@ fn build_simple_prepared_prompt(
     retrieved_docs: &[RetrievedDocument],
 ) -> String {
     if retrieved_docs.is_empty() {
-        prepare_prompt(
+        prompt::prepare_prompt(
             effective_prompt,
             &input.conversation,
             prompt_profiles,
@@ -76,7 +76,7 @@ fn build_simple_prepared_prompt(
             input.active_window_context.as_deref(),
         )
     } else {
-        prepare_prompt_with_retrieval(
+        prompt::prepare_prompt_with_retrieval(
             effective_prompt,
             &input.conversation,
             prompt_profiles,

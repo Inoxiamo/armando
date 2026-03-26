@@ -26,6 +26,7 @@ fn main() -> anyhow::Result<()> {
     run_ui(cfg, prompt_profiles)
 }
 
+#[derive(Debug)]
 struct CliQuery {
     prompt: String,
     backend: String,
@@ -35,6 +36,17 @@ struct CliQuery {
 }
 
 fn parse_cli_query_args(args: &[String], cfg: &config::Config) -> anyhow::Result<Option<CliQuery>> {
+    parse_cli_query_args_with_reader(args, cfg, read_prompt_from_stdin)
+}
+
+fn parse_cli_query_args_with_reader<F>(
+    args: &[String],
+    cfg: &config::Config,
+    stdin_reader: F,
+) -> anyhow::Result<Option<CliQuery>>
+where
+    F: FnOnce() -> anyhow::Result<String>,
+{
     let mut ask: Option<String> = None;
     let mut use_stdin = false;
     let mut backend: Option<String> = None;
@@ -100,7 +112,7 @@ fn parse_cli_query_args(args: &[String], cfg: &config::Config) -> anyhow::Result
     }
 
     let prompt = if use_stdin {
-        read_prompt_from_stdin()?
+        stdin_reader()?
     } else {
         ask.unwrap_or_default()
     };
@@ -397,4 +409,111 @@ fn build_app_icon() -> egui::IconData {
 fn set_icon_pixel(rgba: &mut [u8], width: usize, x: usize, y: usize, color: [u8; 4]) {
     let index = (y * width + x) * 4;
     rgba[index..index + 4].copy_from_slice(&color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg_with_backend(default_backend: &str) -> config::Config {
+        let mut cfg = config::Config::default();
+        cfg.default_backend = default_backend.to_string();
+        cfg
+    }
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_cli_returns_none_without_cli_prompt_flags() {
+        let parsed =
+            parse_cli_query_args_with_reader(&args(&[]), &cfg_with_backend("gemini"), || {
+                Ok(String::new())
+            })
+            .unwrap();
+
+        assert!(parsed.is_none());
+    }
+
+    #[test]
+    fn parse_cli_ask_uses_default_backend_and_generic_mode() {
+        let parsed = parse_cli_query_args_with_reader(
+            &args(&["--ask", "hello world"]),
+            &cfg_with_backend("claude"),
+            || Ok(String::new()),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(parsed.prompt, "hello world");
+        assert_eq!(parsed.backend, "claude");
+        assert_eq!(parsed.mode, PromptMode::GenericQuestion);
+        assert!(!parsed.output_json);
+        assert!(!parsed.include_request);
+    }
+
+    #[test]
+    fn parse_cli_accepts_mode_and_output_flags() {
+        let parsed = parse_cli_query_args_with_reader(
+            &args(&[
+                "--ask",
+                "rewrite me",
+                "--backend",
+                "ollama",
+                "--text-assist",
+                "--json",
+                "--request",
+            ]),
+            &cfg_with_backend("gemini"),
+            || Ok(String::new()),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(parsed.backend, "ollama");
+        assert_eq!(parsed.mode, PromptMode::TextAssist);
+        assert!(parsed.output_json);
+        assert!(parsed.include_request);
+    }
+
+    #[test]
+    fn parse_cli_stdin_reads_prompt_from_reader() {
+        let parsed = parse_cli_query_args_with_reader(
+            &args(&["--stdin", "--generic"]),
+            &cfg_with_backend("gemini"),
+            || Ok("from stdin".to_string()),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(parsed.prompt, "from stdin");
+        assert_eq!(parsed.mode, PromptMode::GenericQuestion);
+    }
+
+    #[test]
+    fn parse_cli_rejects_ask_and_stdin_together() {
+        let err = parse_cli_query_args_with_reader(
+            &args(&["--ask", "hello", "--stdin"]),
+            &cfg_with_backend("gemini"),
+            || Ok("ignored".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Use either --ask or --stdin"));
+    }
+
+    #[test]
+    fn parse_cli_rejects_conflicting_mode_flags() {
+        let err = parse_cli_query_args_with_reader(
+            &args(&["--ask", "hello", "--generic", "--text-assist"]),
+            &cfg_with_backend("gemini"),
+            || Ok(String::new()),
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("Use either --generic or --text-assist"));
+    }
 }
