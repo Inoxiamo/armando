@@ -87,16 +87,8 @@ pub async fn query(
     progress: Option<ResponseProgressSink>,
 ) -> String {
     let request_id = logging::log_request(config, backend, input);
-    let effective_prompt = input.prompt.clone();
-    let prepared_prompt = query_flow::build_prepared_prompt(
-        backend,
-        input,
-        &effective_prompt,
-        prompt_profiles,
-        mode,
-        config,
-    )
-    .await;
+    let prepared_prompt =
+        query_flow::build_prepared_prompt(backend, input, prompt_profiles, mode, config).await;
     query_with_prepared_request(
         backend,
         input,
@@ -155,16 +147,7 @@ pub async fn prepare_request(
     prompt_profiles: &PromptProfiles,
     mode: PromptMode,
 ) -> String {
-    let effective_prompt = input.prompt.clone();
-    query_flow::build_prepared_prompt(
-        backend,
-        input,
-        &effective_prompt,
-        prompt_profiles,
-        mode,
-        config,
-    )
-    .await
+    query_flow::build_prepared_prompt(backend, input, prompt_profiles, mode, config).await
 }
 
 pub async fn embed_text(backend: &str, text: &str, config: &Config) -> Result<Vec<f32>, String> {

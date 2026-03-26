@@ -11,14 +11,13 @@ use super::{
 pub(super) async fn build_prepared_prompt(
     backend: &str,
     input: &QueryInput,
-    effective_prompt: &str,
     prompt_profiles: &PromptProfiles,
     mode: PromptMode,
     config: &Config,
 ) -> String {
     let effective_mode = super::prompt::resolve_prompt_mode(
         mode,
-        effective_prompt,
+        &input.prompt,
         &prompt_profiles.generic_question_tags,
     );
 
@@ -30,10 +29,10 @@ pub(super) async fn build_prepared_prompt(
         }
     }
 
-    let retrieved_docs = retrieve_docs(backend, effective_prompt, config).await;
+    let retrieved_docs = retrieve_docs(backend, &input.prompt, config).await;
     build_simple_prepared_prompt(
         input,
-        effective_prompt,
+        &input.prompt,
         prompt_profiles,
         effective_mode,
         &retrieved_docs,
