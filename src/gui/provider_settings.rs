@@ -364,25 +364,23 @@ fn settings_model_field(
         });
     }
 
-    if provider == "ollama" {
-        if is_pulling {
-            let (status, percentage) = pull_status.unwrap_or_default();
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(pulling_label)
-                        .small()
-                        .color(theme.accent_color),
-                );
-                ui.label(
-                    egui::RichText::new(&status)
-                        .small()
-                        .color(theme.weak_text_color),
-                );
-            });
-            if let Some(p) = percentage {
-                ui.add(egui::ProgressBar::new(p));
-            }
+    if provider == "ollama" && is_pulling {
+        let (status, percentage) = pull_status.unwrap_or_default();
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(pulling_label)
+                    .small()
+                    .color(theme.accent_color),
+            );
+            ui.label(
+                egui::RichText::new(&status)
+                    .small()
+                    .color(theme.weak_text_color),
+            );
+        });
+        if let Some(p) = percentage {
+            ui.add(egui::ProgressBar::new(p));
         }
     }
 

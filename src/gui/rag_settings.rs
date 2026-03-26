@@ -202,17 +202,16 @@ pub(super) fn render_rag_settings_section(
                                         ),
                                     )
                                     .clicked()
+                                    && preset != RagTuningPreset::Custom
                                 {
-                                    if preset != RagTuningPreset::Custom {
-                                        let (chunk_size, top_n) = preset_values_for_mode(
-                                            preset,
-                                            active_mode,
-                                            app.rag_corpus_stats.as_ref(),
-                                        );
-                                        app.config.rag.chunk_size = chunk_size;
-                                        app.config.rag.max_retrieved_docs = top_n;
-                                        app.persist_settings();
-                                    }
+                                    let (chunk_size, top_n) = preset_values_for_mode(
+                                        preset,
+                                        active_mode,
+                                        app.rag_corpus_stats.as_ref(),
+                                    );
+                                    app.config.rag.chunk_size = chunk_size;
+                                    app.config.rag.max_retrieved_docs = top_n;
+                                    app.persist_settings();
                                 }
                             }
                         });

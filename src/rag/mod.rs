@@ -389,15 +389,18 @@ impl RagSystem {
         let tx = conn.transaction()?;
         clear_backend_entries(&tx, &retrieval_scope)?;
         for chunk in &prepared.chunks {
+            let persist_input = PersistChunkInput {
+                file_path: &chunk.file_path,
+                chunk_index: chunk.chunk_index,
+                chunk_text: &chunk.chunk_text,
+                embedding: chunk.embedding.as_deref(),
+                chunk_size: self.config.chunk_size,
+                index_keyword: prepared.store_keyword_index,
+            };
             persist_chunk(
                 &tx,
                 &retrieval_scope,
-                &chunk.file_path,
-                chunk.chunk_index,
-                &chunk.chunk_text,
-                chunk.embedding.as_deref(),
-                self.config.chunk_size,
-                prepared.store_keyword_index,
+                &persist_input,
             )?;
         }
         tx.commit()?;
@@ -679,17 +682,21 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+struct PersistChunkInput<'a> {
+    file_path: &'a Path,
+    chunk_index: usize,
+    chunk_text: &'a str,
+    embedding: Option<&'a [f32]>,
+    chunk_size: usize,
+    index_keyword: bool,
+}
+
 fn persist_chunk(
     conn: &Transaction<'_>,
     backend: &str,
-    file_path: &Path,
-    chunk_index: usize,
-    chunk_text: &str,
-    embedding: Option<&[f32]>,
-    chunk_size: usize,
-    index_keyword: bool,
+    chunk: &PersistChunkInput<'_>,
 ) -> Result<()> {
-    let embedding_json = match embedding {
+    let embedding_json = match chunk.embedding {
         Some(embedding) => serde_json::to_string(embedding)?,
         None => "[]".to_string(),
     };
@@ -698,14 +705,14 @@ fn persist_chunk(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             backend,
-            file_path.to_string_lossy().to_string(),
-            chunk_index as i64,
-            chunk_text,
+            chunk.file_path.to_string_lossy().to_string(),
+            chunk.chunk_index as i64,
+            chunk.chunk_text,
             embedding_json,
-            chunk_size as i64
+            chunk.chunk_size as i64
         ],
     )?;
-    if index_keyword {
+    if chunk.index_keyword {
         let rowid = conn.last_insert_rowid();
         conn.execute(
             "INSERT INTO rag_vectors_fts (rowid, backend, file_path, chunk_index, chunk_text)
@@ -713,9 +720,9 @@ fn persist_chunk(
             params![
                 rowid,
                 backend,
-                file_path.to_string_lossy().to_string(),
-                chunk_index as i64,
-                chunk_text,
+                chunk.file_path.to_string_lossy().to_string(),
+                chunk.chunk_index as i64,
+                chunk.chunk_text,
             ],
         )?;
     }

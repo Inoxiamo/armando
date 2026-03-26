@@ -578,19 +578,21 @@ rag:
         std::env::set_var("ARMANDO_GEMINI_API_KEY", "YOUR_GEMINI_API_KEY");
         std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "YOUR_ANTHROPIC_API_KEY");
 
-        let mut config = Config::default();
-        config.chatgpt = Some(ChatGptConfig {
-            api_key: "keep-openai".to_string(),
-            model: "gpt-4o-mini".to_string(),
-        });
-        config.gemini = Some(GeminiConfig {
-            api_key: "keep-gemini".to_string(),
-            model: "gemini-1.5-flash".to_string(),
-        });
-        config.claude = Some(ClaudeConfig {
-            api_key: "keep-claude".to_string(),
-            model: "claude-3-5-sonnet-latest".to_string(),
-        });
+        let mut config = Config {
+            chatgpt: Some(ChatGptConfig {
+                api_key: "keep-openai".to_string(),
+                model: "gpt-4o-mini".to_string(),
+            }),
+            gemini: Some(GeminiConfig {
+                api_key: "keep-gemini".to_string(),
+                model: "gemini-1.5-flash".to_string(),
+            }),
+            claude: Some(ClaudeConfig {
+                api_key: "keep-claude".to_string(),
+                model: "claude-3-5-sonnet-latest".to_string(),
+            }),
+            ..Default::default()
+        };
 
         apply_env_overrides(&mut config);
 

@@ -31,6 +31,9 @@ mod startup_health;
 mod update_status;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+type AsyncPullResults = Arc<Mutex<Vec<(String, Result<(), String>)>>>;
+type AsyncPullStatus = Arc<Mutex<HashMap<String, (String, Option<f32>)>>>;
+
 pub const POPULAR_OLLAMA_MODELS: &[&str] = &[
     "llama3",
     "llama3:8b",
@@ -498,8 +501,8 @@ pub struct AiPopupApp {
     async_response_chunks: Arc<Mutex<Vec<String>>>,
     async_dictation: Arc<Mutex<Option<Result<String, String>>>>,
     async_available_models: AsyncAvailableModels,
-    async_pull_results: Arc<Mutex<Vec<(String, Result<(), String>)>>>,
-    async_pull_status: Arc<Mutex<HashMap<String, (String, Option<f32>)>>>,
+    async_pull_results: AsyncPullResults,
+    async_pull_status: AsyncPullStatus,
     async_release_check: AsyncReleaseCheck,
     async_rag_index: Arc<Mutex<Option<Result<IndexStats, String>>>>,
     release_check_state: ReleaseCheckState,
@@ -1427,15 +1430,14 @@ impl AiPopupApp {
 
         let progress_ctx = ctx.clone();
         let progress_sink: ResponseProgressSink =
-            Arc::new(move |event: ResponseProgress| match event {
-                ResponseProgress::PullStatus(status, percentage) => {
+            Arc::new(move |event: ResponseProgress| {
+                if let ResponseProgress::PullStatus(status, percentage) = event {
                     async_pull_status
                         .lock()
                         .unwrap()
                         .insert("ollama".to_string(), (status, percentage));
                     progress_ctx.request_repaint();
                 }
-                _ => {}
             });
 
         self.runtime.spawn(async move {
