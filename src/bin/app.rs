@@ -1,5 +1,7 @@
 use armando::{backends, config, gui, prompt_profiles, theme};
+use backends::{PromptMode, QueryInput};
 use eframe::{egui, Theme};
+use std::io::Read;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -8,13 +10,219 @@ use theme::load_theme;
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = std::env::args().skip(1).collect();
     let cfg = config::Config::load()?;
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print_help();
+        return Ok(());
+    }
     if args.iter().any(|arg| arg == "--rag-index") {
         return run_rag_index(cfg);
     }
     let prompt_profiles = prompt_profiles::PromptProfiles::load(&cfg)?;
+    if let Some(cli) = parse_cli_query_args(&args, &cfg)? {
+        return run_cli_query(cfg, prompt_profiles, cli);
+    }
     run_ui(cfg, prompt_profiles)
+}
+
+struct CliQuery {
+    prompt: String,
+    backend: String,
+    mode: PromptMode,
+    output_json: bool,
+    include_request: bool,
+}
+
+fn parse_cli_query_args(args: &[String], cfg: &config::Config) -> anyhow::Result<Option<CliQuery>> {
+    let mut ask: Option<String> = None;
+    let mut use_stdin = false;
+    let mut backend: Option<String> = None;
+    let mut force_generic = false;
+    let mut force_text_assist = false;
+    let mut output_json = false;
+    let mut include_request = false;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--ask" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(anyhow::anyhow!("--ask requires a prompt value"));
+                };
+                ask = Some(value.to_string());
+                index += 2;
+            }
+            "--stdin" => {
+                use_stdin = true;
+                index += 1;
+            }
+            "--backend" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(anyhow::anyhow!("--backend requires a backend name"));
+                };
+                backend = Some(value.trim().to_string());
+                index += 2;
+            }
+            "--generic" => {
+                force_generic = true;
+                index += 1;
+            }
+            "--text-assist" => {
+                force_text_assist = true;
+                index += 1;
+            }
+            "--json" => {
+                output_json = true;
+                index += 1;
+            }
+            "--request" => {
+                include_request = true;
+                index += 1;
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    if force_generic && force_text_assist {
+        return Err(anyhow::anyhow!(
+            "Use either --generic or --text-assist, not both"
+        ));
+    }
+
+    if ask.is_none() && !use_stdin {
+        return Ok(None);
+    }
+    if ask.is_some() && use_stdin {
+        return Err(anyhow::anyhow!("Use either --ask or --stdin, not both"));
+    }
+
+    let prompt = if use_stdin {
+        read_prompt_from_stdin()?
+    } else {
+        ask.unwrap_or_default()
+    };
+    if prompt.trim().is_empty() {
+        return Err(anyhow::anyhow!("Prompt cannot be empty"));
+    }
+
+    let mode = if force_text_assist {
+        PromptMode::TextAssist
+    } else {
+        PromptMode::GenericQuestion
+    };
+
+    let backend = backend.unwrap_or_else(|| cfg.default_backend.clone());
+
+    Ok(Some(CliQuery {
+        prompt,
+        backend,
+        mode,
+        output_json,
+        include_request,
+    }))
+}
+
+fn read_prompt_from_stdin() -> anyhow::Result<String> {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    Ok(input)
+}
+
+fn run_cli_query(
+    cfg: config::Config,
+    prompt_profiles: prompt_profiles::PromptProfiles,
+    cli: CliQuery,
+) -> anyhow::Result<()> {
+    let backend = cli.backend;
+    let mode = cli.mode;
+    let prompt = cli.prompt;
+    let output_json = cli.output_json;
+    let include_request = cli.include_request;
+    let runtime = Runtime::new()?;
+    let query_input = QueryInput {
+        prompt,
+        images: Vec::new(),
+        conversation: Vec::new(),
+        active_window_context: None,
+    };
+    let prepared_request = if include_request {
+        Some(runtime.block_on(backends::prepare_request(
+            &backend,
+            &query_input,
+            &cfg,
+            &prompt_profiles,
+            mode,
+        )))
+    } else {
+        None
+    };
+    let response = if let Some(prepared_prompt) = prepared_request.as_ref() {
+        runtime.block_on(backends::query_with_prepared_request(
+            &backend,
+            &query_input,
+            &cfg,
+            None,
+            prepared_prompt.clone(),
+            None,
+        ))
+    } else {
+        runtime.block_on(backends::query(
+            &backend,
+            &query_input,
+            &cfg,
+            &prompt_profiles,
+            mode,
+            None,
+        ))
+    };
+
+    if output_json {
+        let is_error = response.starts_with("❌");
+        let mode = match mode {
+            PromptMode::TextAssist => "text_assist",
+            PromptMode::GenericQuestion => "generic_question",
+        };
+        let payload = serde_json::json!({
+            "ok": !is_error,
+            "backend": backend,
+            "mode": mode,
+            "request": prepared_request,
+            "response": response,
+        });
+        println!("{}", serde_json::to_string(&payload)?);
+    } else {
+        if let Some(prepared) = prepared_request {
+            println!("Request:\n{prepared}\n");
+        }
+        println!("{response}");
+    }
+    Ok(())
+}
+
+fn print_help() {
+    println!(
+        "armando\n\
+         \n\
+         Usage:\n\
+           armando                       Start desktop UI\n\
+           armando --rag-index           Index RAG documents\n\
+           armando --ask \"...\"           Ask from CLI (default mode: generic question)\n\
+           armando --stdin               Read prompt from stdin and answer in CLI\n\
+         \n\
+         Options for CLI query mode:\n\
+           --backend <name>              Backend override (chatgpt|claude|gemini|ollama)\n\
+           --generic                     Force generic question mode (default in CLI)\n\
+           --text-assist                 Force text assist mode\n\
+           --json                        Print structured JSON output\n\
+           --request                     Print prepared request instructions (and include in JSON)\n\
+           --help, -h                    Show this help\n\
+         \n\
+         Tip:\n\
+           Use `GENERIC: ...` to force generic-question behavior even when text-assist is selected."
+    );
 }
 
 fn run_rag_index(cfg: config::Config) -> anyhow::Result<()> {

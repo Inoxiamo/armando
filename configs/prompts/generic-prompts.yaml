@@ -1,5 +1,8 @@
 # Legacy fallback location. Preferred: configs/prompts/generic-prompts.yaml
 tags:
+  GENERIC:
+    instruction: ""
+    strip_header: true
   CMD:
     instruction: "If the requested answer is a shell command or terminal one-liner, return only the final command, with no Markdown, no backticks, and no extra text."
     strip_header: true

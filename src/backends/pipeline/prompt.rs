@@ -26,11 +26,16 @@ pub(crate) fn prepare_prompt_with_retrieval(
     prompt: &str,
     conversation: &[ConversationTurn],
     prompt_profiles: &PromptProfiles,
-    mode: PromptMode,
+    requested_mode: PromptMode,
     has_images: bool,
     active_window_context: Option<&str>,
     retrieved_docs: &[RetrievedDocument],
 ) -> String {
+    let mode = resolve_prompt_mode(
+        requested_mode,
+        prompt,
+        &prompt_profiles.generic_question_tags,
+    );
     let (expanded_prompt, detected_tags) = match mode {
         PromptMode::TextAssist => expand_tags(
             prompt,
@@ -50,19 +55,13 @@ pub(crate) fn prepare_prompt_with_retrieval(
 
     let mut instructions = match mode {
         PromptMode::TextAssist => vec![
-            "Act as a text transformation assistant focused on rewriting, improving, correcting, translating, and adapting text.".to_string(),
-            "Treat the user's input as text to transform unless the user explicitly asks for something else.".to_string(),
-            "Produce a final version that is ready to copy and use directly in the target context.".to_string(),
-            "Preserve the original meaning while improving clarity, tone, grammar, syntax, and readability.".to_string(),
-            "Apply style, tone, and formatting instructions directly in the final text without explaining what you changed.".to_string(),
-            "Return only the final requested content.".to_string(),
-            "Do not add introductions, commentary, explanations, or closing remarks.".to_string(),
-            "Do not add quotation marks or special formatting unless explicitly requested.".to_string(),
+            "Act as a text transformation assistant.".to_string(),
+            "Rewrite and improve the provided text while preserving meaning.".to_string(),
+            "Apply requested tone/style directly and return only the final text.".to_string(),
         ],
-        PromptMode::GenericQuestion => vec![
-            // Keep it pure: minimal instructions to ensure it behaves as a chat model
-            "Answer the user's request accurately and directly.".to_string(),
-        ],
+        PromptMode::GenericQuestion => {
+            vec!["Answer the user's request accurately and directly.".to_string()]
+        }
     };
 
     match mode {
@@ -71,7 +70,8 @@ pub(crate) fn prepare_prompt_with_retrieval(
                 instructions.push(format!("Write the final output in {language}."));
             } else {
                 instructions.push(
-                    "Unless an explicit language tag is provided, keep the final output in the same language as the source text that follows the tags.".to_string(),
+                    "Unless an explicit language tag is provided, keep the final output in the same language as the source text that follows the tags. Change language only when the user explicitly asks for translation."
+                        .to_string(),
                 );
             }
         }
@@ -80,7 +80,8 @@ pub(crate) fn prepare_prompt_with_retrieval(
                 instructions.push(format!("Answer in {language}."));
             } else {
                 instructions.push(
-                    "Unless an explicit language tag is provided, answer in the same language as the user's request.".to_string(),
+                    "Unless an explicit language tag is provided, answer in the same language as the user's request. Change language only when the user explicitly asks for translation."
+                        .to_string(),
                 );
             }
         }
@@ -110,13 +111,6 @@ pub(crate) fn prepare_prompt_with_retrieval(
         if !generic_tag_instructions.is_empty() {
             instructions.extend(generic_tag_instructions);
         }
-    }
-
-    if !detected_tags.is_empty() {
-        instructions.push(format!(
-            "Automatically apply these context instructions: {}.",
-            detected_tags.join(", ")
-        ));
     }
 
     if !retrieved_docs.is_empty() {
@@ -187,6 +181,35 @@ pub(crate) fn prepare_prompt_with_retrieval(
         instructions.join("\n"),
         conversation_block,
     )
+}
+
+pub(crate) fn resolve_prompt_mode(
+    requested_mode: PromptMode,
+    prompt: &str,
+    generic_tags: &HashMap<String, GenericPromptTag>,
+) -> PromptMode {
+    if requested_mode == PromptMode::TextAssist
+        && header_contains_force_generic(prompt, generic_tags)
+    {
+        PromptMode::GenericQuestion
+    } else {
+        requested_mode
+    }
+}
+
+fn header_contains_force_generic(
+    prompt: &str,
+    generic_tags: &HashMap<String, GenericPromptTag>,
+) -> bool {
+    let Some(colon_idx) = prompt.find(':') else {
+        return false;
+    };
+    let header = prompt[..colon_idx].trim();
+    if header.is_empty() {
+        return false;
+    }
+    let tags = parse_known_tags(header, |tag| generic_tags.contains_key(tag));
+    tags.iter().any(|tag| tag == "GENERIC")
 }
 
 pub(crate) fn expand_generic_question_prompt(

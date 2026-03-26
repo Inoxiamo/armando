@@ -16,9 +16,15 @@ pub(super) async fn build_prepared_prompt(
     mode: PromptMode,
     config: &Config,
 ) -> String {
+    let effective_mode = super::prompt::resolve_prompt_mode(
+        mode,
+        effective_prompt,
+        &prompt_profiles.generic_question_tags,
+    );
+
     if matches!(config.rag.engine, RagEngine::Langchain) && config.rag.enabled {
         if let Some(prepared_prompt) =
-            prepare_prompt_with_langchain_fallback(backend, input, mode, config).await
+            prepare_prompt_with_langchain_fallback(backend, input, effective_mode, config).await
         {
             return prepared_prompt;
         }
@@ -29,7 +35,7 @@ pub(super) async fn build_prepared_prompt(
         input,
         effective_prompt,
         prompt_profiles,
-        mode,
+        effective_mode,
         &retrieved_docs,
     )
 }

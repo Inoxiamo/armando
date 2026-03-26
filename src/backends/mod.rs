@@ -98,14 +98,36 @@ pub async fn query(
         config,
     )
     .await;
-    logging::log_prepared_prompt(config, request_id, backend, input, &prepared_prompt);
+    query_with_prepared_request(
+        backend,
+        input,
+        config,
+        request_id,
+        prepared_prompt,
+        progress,
+    )
+    .await
+}
+
+pub async fn query_with_prepared_request(
+    backend: &str,
+    input: &QueryInput,
+    config: &Config,
+    request_id: Option<u64>,
+    prepared_prompt: String,
+    progress: Option<ResponseProgressSink>,
+) -> String {
+    if request_id.is_some() {
+        logging::log_prepared_prompt(config, request_id, backend, input, &prepared_prompt);
+    }
     let res =
         query_flow::dispatch_backend_query(backend, &prepared_prompt, input, config, progress)
             .await;
-
     match res {
         Ok(text) => {
-            logging::log_success(config, request_id, backend, input, &text);
+            if request_id.is_some() {
+                logging::log_success(config, request_id, backend, input, &text);
+            }
             if config.history.enabled {
                 if let Ok(entry) = history::new_entry(backend, &input.prompt, &text) {
                     let _ = history::append_entry(entry);
@@ -119,10 +141,31 @@ pub async fn query(
                 return format!("❌ {error_text}");
             }
             log::error!("{backend} error: {e:?}");
-            logging::log_error(config, request_id, backend, input, &error_text);
+            if request_id.is_some() {
+                logging::log_error(config, request_id, backend, input, &error_text);
+            }
             format!("❌ {backend} error: {e}")
         }
     }
+}
+
+pub async fn prepare_request(
+    backend: &str,
+    input: &QueryInput,
+    config: &Config,
+    prompt_profiles: &PromptProfiles,
+    mode: PromptMode,
+) -> String {
+    let effective_prompt = input.prompt.clone();
+    query_flow::build_prepared_prompt(
+        backend,
+        input,
+        &effective_prompt,
+        prompt_profiles,
+        mode,
+        config,
+    )
+    .await
 }
 
 pub async fn embed_text(backend: &str, text: &str, config: &Config) -> Result<Vec<f32>, String> {
@@ -375,7 +418,7 @@ mod tests {
 
         assert!(prompt.contains("return only the final command"));
         assert!(!prompt.contains("Use clear Markdown formatting when it helps readability."));
-        assert!(prompt.contains("Automatically apply these context instructions: CMD."));
+        assert!(!prompt.contains("Automatically apply these context instructions"));
         assert!(prompt.contains("User request:\ndammi il comando per vedere i processi"));
     }
 
@@ -535,6 +578,22 @@ mod tests {
         assert!(prompt.contains("Rispondi solo con SQL valido."));
         assert!(prompt.contains("User request:\nelenco utenti ordinati per nome"));
         assert!(!prompt.contains("Use clear Markdown formatting when it helps readability."));
+    }
+
+    #[test]
+    fn text_assist_mode_auto_switches_to_generic_when_generic_tag_is_used() {
+        let prompt = prepare_prompt(
+            "GENERIC: what does rust ownership mean?",
+            &[],
+            &test_profiles(),
+            PromptMode::TextAssist,
+            false,
+            None,
+        );
+
+        assert!(prompt.contains("Answer the user's request accurately and directly."));
+        assert!(!prompt.contains("Rewrite and improve the provided text while preserving meaning."));
+        assert!(prompt.contains("User request:\nwhat does rust ownership mean?"));
     }
 
     #[test]
