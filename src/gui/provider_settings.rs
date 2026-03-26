@@ -440,10 +440,8 @@ fn settings_model_field(
                     });
             });
         }
-    } else {
-        if provider != "ollama" {
-            ui.label(super::muted_label(models_hint_label, theme.weak_text_color));
-        }
+    } else if provider != "ollama" {
+        ui.label(super::muted_label(models_hint_label, theme.weak_text_color));
     }
 
     if let Some(error) = &state.last_error {

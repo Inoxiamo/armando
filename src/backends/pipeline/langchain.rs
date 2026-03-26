@@ -186,11 +186,10 @@ async fn build_http_error(operation: &str, response: reqwest::Response) -> Strin
     let body = response.text().await.unwrap_or_default();
     let error_message = parse_error_message(&body).unwrap_or_else(|| body.trim().to_string());
     if error_message.is_empty() {
-        format!("LangChain {operation} request failed with HTTP {}", status)
+        format!("LangChain {operation} request failed with HTTP {status}")
     } else {
         format!(
-            "LangChain {operation} request failed with HTTP {}: {}",
-            status, error_message
+            "LangChain {operation} request failed with HTTP {status}: {error_message}"
         )
     }
 }
