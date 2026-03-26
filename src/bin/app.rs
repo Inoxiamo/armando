@@ -3,6 +3,7 @@ use backends::{PromptMode, QueryInput};
 use eframe::{egui, Theme};
 use std::io::Read;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::runtime::Runtime;
 
 use theme::load_theme;
@@ -160,36 +161,28 @@ fn run_cli_query(
         conversation: Vec::new(),
         active_window_context: None,
     };
-    let prepared_request = if include_request {
-        Some(runtime.block_on(backends::prepare_request(
-            &backend,
-            &query_input,
-            &cfg,
-            &prompt_profiles,
-            mode,
-        )))
-    } else {
-        None
-    };
-    let response = if let Some(prepared_prompt) = prepared_request.as_ref() {
-        runtime.block_on(backends::query_with_prepared_request(
-            &backend,
-            &query_input,
-            &cfg,
-            None,
-            prepared_prompt.clone(),
-            None,
-        ))
-    } else {
-        runtime.block_on(backends::query(
-            &backend,
-            &query_input,
-            &cfg,
-            &prompt_profiles,
-            mode,
-            None,
-        ))
-    };
+    let total_started = Instant::now();
+    let prepare_started = Instant::now();
+    let prepared_prompt = runtime.block_on(backends::prepare_request(
+        &backend,
+        &query_input,
+        &cfg,
+        &prompt_profiles,
+        mode,
+    ));
+    let prepare_ms = prepare_started.elapsed().as_millis();
+
+    let query_started = Instant::now();
+    let response = runtime.block_on(backends::query_with_prepared_request(
+        &backend,
+        &query_input,
+        &cfg,
+        None,
+        prepared_prompt.clone(),
+        None,
+    ));
+    let query_ms = query_started.elapsed().as_millis();
+    let total_ms = total_started.elapsed().as_millis();
 
     if output_json {
         let is_error = response.starts_with("❌");
@@ -201,13 +194,16 @@ fn run_cli_query(
             "ok": !is_error,
             "backend": backend,
             "mode": mode,
-            "request": prepared_request,
+            "request": if include_request { Some(prepared_prompt.clone()) } else { None },
+            "prepare_ms": prepare_ms,
+            "query_ms": query_ms,
+            "total_ms": total_ms,
             "response": response,
         });
         println!("{}", serde_json::to_string(&payload)?);
     } else {
-        if let Some(prepared) = prepared_request {
-            println!("Request:\n{prepared}\n");
+        if include_request {
+            println!("Request:\n{prepared_prompt}\n");
         }
         println!("{response}");
     }
