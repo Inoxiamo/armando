@@ -14,7 +14,7 @@ logging:
 update:
   beta: false
 rag:
-  enabled: true
+  enabled: false
   engine: langchain
   mode: vector
   documents_folder: YOUR_RAG_DOCUMENTS_FOLDER
