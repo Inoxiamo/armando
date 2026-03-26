@@ -107,6 +107,7 @@ RAG is configured under `rag` and can be switched between lexical and semantic r
 ```yaml
 rag:
   enabled: true
+  engine: simple # simple | langchain
   mode: keyword # keyword | vector | hybrid
   documents_folder: "YOUR_RAG_DOCUMENTS_FOLDER"
   vector_db_path: ".armando-rag.sqlite3"
@@ -114,6 +115,9 @@ rag:
   chunk_size: 1200
   embedding_backend: "ollama" # optional, for vector/hybrid
   embedding_model: "nomic-embed-text" # optional, for vector/hybrid
+  langchain_base_url: "http://127.0.0.1:8001" # used when engine=langchain
+  langchain_timeout_ms: 8000
+  langchain_retry_count: 1
 ```
 
 `documents_folder` can also be supplied from `.env` with `ARMANDO_RAG_DOCUMENTS_FOLDER`.
@@ -146,6 +150,18 @@ When the settings panel is open, the footer shows the current app version and, o
 - `keyword`: lexical retrieval with SQLite FTS5/BM25; no embedding API calls.
 - `vector`: embedding-based retrieval with cosine similarity.
 - `hybrid`: combines lexical + vector scores.
+
+## RAG Engine
+
+- `simple` (default): built-in RAG indexing/retrieval in Rust (`keyword`/`vector`/`hybrid`).
+- `langchain`: external local HTTP service handles documents, embeddings, and prepared prompt generation.
+
+When `rag.engine: langchain` is enabled, armando calls:
+
+- `POST /v1/rag/prepare` for request-time prepared prompts
+- `POST /v1/rag/index` for `--rag-index` and UI indexing
+
+If LangChain fails, armando retries once (configurable) and then falls back automatically to `simple`.
 
 When vector scoring is active, `rag.embedding_backend` and `rag.embedding_model` let you decouple embedding from the currently selected query backend/model.
 If `rag.embedding_backend` is not set, embeddings follow the selected query backend (or `default_backend` if needed).

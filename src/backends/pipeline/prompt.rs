@@ -60,10 +60,8 @@ pub(crate) fn prepare_prompt_with_retrieval(
             "Do not add quotation marks or special formatting unless explicitly requested.".to_string(),
         ],
         PromptMode::GenericQuestion => vec![
-            "Treat the user's text as a general question or request, not as a text-cleanup task."
-                .to_string(),
-            "Answer the user's request directly and accurately.".to_string(),
-            "Keep the response useful, concise, and free of unnecessary preambles.".to_string(),
+            // Keep it pure: minimal instructions to ensure it behaves as a chat model
+            "Answer the user's request accurately and directly.".to_string(),
         ],
     };
 
@@ -109,10 +107,7 @@ pub(crate) fn prepare_prompt_with_retrieval(
             .filter(|instruction| !instruction.is_empty())
             .collect::<Vec<_>>();
 
-        if generic_tag_instructions.is_empty() {
-            instructions
-                .push("Use clear Markdown formatting when it helps readability.".to_string());
-        } else {
+        if !generic_tag_instructions.is_empty() {
             instructions.extend(generic_tag_instructions);
         }
     }
@@ -125,22 +120,35 @@ pub(crate) fn prepare_prompt_with_retrieval(
     }
 
     if !retrieved_docs.is_empty() {
-        instructions.push("Use the retrieved context below as additional grounding instructions when relevant. If retrieved context conflicts with the direct user request, prioritize the user request.".to_string());
-        let context = retrieved_docs
-            .iter()
-            .enumerate()
-            .map(|(idx, doc)| {
-                format!(
-                    "[{}] source={} score={:.4}\n{}",
-                    idx + 1,
-                    doc.file_path,
-                    doc.score,
-                    doc.chunk_text.trim()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        instructions.push(format!("Retrieved context:\n{context}"));
+        let mut context = String::new();
+        let total_limit = 8000;
+
+        for (idx, doc) in retrieved_docs.iter().enumerate() {
+            let doc_text = format!(
+                "[{}] source={} score={:.4}\n{}",
+                idx + 1,
+                doc.file_path,
+                doc.score,
+                doc.chunk_text.trim()
+            );
+
+            if context.len() + doc_text.len() > total_limit {
+                if context.is_empty() {
+                    context = doc_text[..total_limit].to_string();
+                }
+                break;
+            }
+
+            if !context.is_empty() {
+                context.push_str("\n\n");
+            }
+            context.push_str(&doc_text);
+        }
+
+        if !context.is_empty() {
+            instructions.push("Use the retrieved context below as additional grounding instructions when relevant. If retrieved context conflicts with the direct user request, prioritize the user request.".to_string());
+            instructions.push(format!("Retrieved context:\n{context}"));
+        }
     }
 
     let effective_prompt = if expanded_prompt.trim().is_empty() && has_images {
@@ -295,4 +303,66 @@ where
 
 fn normalize_tag(tag: &str) -> String {
     tag.trim().to_uppercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backends::PromptMode;
+    use crate::prompt_profiles::PromptProfiles;
+
+    #[test]
+    fn test_generic_question_pure_prompt() {
+        let profiles = PromptProfiles::default_built_in();
+        let prompt = "How are you?";
+        let prepared = prepare_prompt(
+            prompt,
+            &[],
+            &profiles,
+            PromptMode::GenericQuestion,
+            false,
+            None,
+        );
+
+        // Should contain the minimal instruction and the user request
+        assert!(prepared.contains("Answer the user's request accurately and directly."));
+        assert!(prepared.contains("User request:\nHow are you?"));
+        // Should NOT contain the old instructions
+        assert!(!prepared.contains("Treat the user's text as a general question"));
+        assert!(!prepared.contains("Keep the response useful, concise"));
+    }
+
+    #[test]
+    fn test_rag_context_truncation() {
+        let profiles = PromptProfiles::default_built_in();
+        let prompt = "Tell me about RAG.";
+        let docs = vec![
+            RetrievedDocument {
+                file_path: "doc1.txt".to_string(),
+                chunk_text: "A".repeat(5000),
+                score: 0.9,
+            },
+            RetrievedDocument {
+                file_path: "doc2.txt".to_string(),
+                chunk_text: "B".repeat(5000),
+                score: 0.8,
+            },
+        ];
+
+        let prepared = prepare_prompt_with_retrieval(
+            prompt,
+            &[],
+            &profiles,
+            PromptMode::GenericQuestion,
+            false,
+            None,
+            &docs,
+        );
+
+        // Total limit is 8000. Doc1 is ~5000 + headers. Doc2 would exceed it.
+        assert!(prepared.contains("doc1.txt"));
+        assert!(!prepared.contains("doc2.txt"));
+        assert!(prepared.len() > 5000);
+        assert!(prepared.len() < 9000);
+    }
 }

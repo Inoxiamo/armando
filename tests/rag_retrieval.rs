@@ -89,6 +89,7 @@ fn rag_vector_retrieval_returns_most_similar_chunks_first() {
         chunk_size: 500,
         embedding_backend: None,
         embedding_model: None,
+        ..RagConfig::default()
     });
     let results = rag
         .retrieve_from_embedding("ollama", &[1.0_f32, 0.0_f32], 2)
@@ -120,6 +121,7 @@ fn rag_keyword_indexing_and_retrieval_skip_embeddings() {
         chunk_size: 500,
         embedding_backend: None,
         embedding_model: None,
+        ..RagConfig::default()
     });
 
     let mut config = Config::default();
@@ -132,6 +134,7 @@ fn rag_keyword_indexing_and_retrieval_skip_embeddings() {
         chunk_size: 500,
         embedding_backend: None,
         embedding_model: None,
+        ..RagConfig::default()
     };
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -200,6 +203,7 @@ fn rag_hybrid_merge_combines_keyword_and_vector_scores() {
         chunk_size: 500,
         embedding_backend: None,
         embedding_model: None,
+        ..RagConfig::default()
     });
 
     let results = rag

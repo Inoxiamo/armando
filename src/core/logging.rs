@@ -184,7 +184,7 @@ fn append_readable_event(event: &DebugLogEvent<'_>) -> anyhow::Result<()> {
     writeln!(file, "prompt:\n{}\n", event.prompt)?;
 
     if let Some(detail) = &event.detail {
-        writeln!(file, "detail:\n{}\n", detail)?;
+        writeln!(file, "detail:\n{detail}\n")?;
     }
     writeln!(file, "----------------------------------------\n")?;
     Ok(())

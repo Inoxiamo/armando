@@ -38,10 +38,20 @@ pub enum RagMode {
     Hybrid,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RagEngine {
+    #[default]
+    Simple,
+    Langchain,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RagConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub engine: RagEngine,
     #[serde(default)]
     pub mode: RagMode,
     pub documents_folder: Option<PathBuf>,
@@ -55,6 +65,12 @@ pub struct RagConfig {
     pub embedding_backend: Option<String>,
     #[serde(default)]
     pub embedding_model: Option<String>,
+    #[serde(default = "default_langchain_base_url")]
+    pub langchain_base_url: String,
+    #[serde(default = "default_langchain_timeout_ms")]
+    pub langchain_timeout_ms: u64,
+    #[serde(default = "default_langchain_retry_count")]
+    pub langchain_retry_count: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -202,10 +218,23 @@ fn default_rag_chunk_size() -> usize {
     1200
 }
 
+fn default_langchain_base_url() -> String {
+    "http://127.0.0.1:8001".to_string()
+}
+
+fn default_langchain_timeout_ms() -> u64 {
+    8_000
+}
+
+fn default_langchain_retry_count() -> usize {
+    1
+}
+
 impl Default for RagConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            engine: RagEngine::Simple,
             mode: RagMode::Vector,
             documents_folder: None,
             vector_db_path: default_rag_vector_db_path(),
@@ -213,6 +242,9 @@ impl Default for RagConfig {
             chunk_size: default_rag_chunk_size(),
             embedding_backend: None,
             embedding_model: None,
+            langchain_base_url: default_langchain_base_url(),
+            langchain_timeout_ms: default_langchain_timeout_ms(),
+            langchain_retry_count: default_langchain_retry_count(),
         }
     }
 }
@@ -463,6 +495,7 @@ mod tests {
         assert!(!config.logging.enabled);
         assert!(!config.update.beta);
         assert!(!config.rag.enabled);
+        assert_eq!(config.rag.engine, RagEngine::Simple);
         assert_eq!(config.rag.mode, RagMode::Vector);
         assert!(config.rag.documents_folder.is_none());
         assert_eq!(
@@ -473,24 +506,35 @@ mod tests {
         assert_eq!(config.rag.chunk_size, 1200);
         assert!(config.rag.embedding_backend.is_none());
         assert!(config.rag.embedding_model.is_none());
+        assert_eq!(config.rag.langchain_base_url, "http://127.0.0.1:8001");
+        assert_eq!(config.rag.langchain_timeout_ms, 8_000);
+        assert_eq!(config.rag.langchain_retry_count, 1);
     }
 
     #[test]
     fn rag_config_deserializes_mode_and_embedding_overrides() {
         let yaml = r#"
 rag:
+  engine: langchain
   mode: hybrid
   embedding_backend: chatgpt
   embedding_model: text-embedding-3-large
+  langchain_base_url: http://127.0.0.1:18001
+  langchain_timeout_ms: 5000
+  langchain_retry_count: 2
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
 
+        assert_eq!(config.rag.engine, RagEngine::Langchain);
         assert_eq!(config.rag.mode, RagMode::Hybrid);
         assert_eq!(config.rag.embedding_backend.as_deref(), Some("chatgpt"));
         assert_eq!(
             config.rag.embedding_model.as_deref(),
             Some("text-embedding-3-large")
         );
+        assert_eq!(config.rag.langchain_base_url, "http://127.0.0.1:18001");
+        assert_eq!(config.rag.langchain_timeout_ms, 5_000);
+        assert_eq!(config.rag.langchain_retry_count, 2);
     }
 
     #[test]
@@ -534,19 +578,21 @@ rag:
         std::env::set_var("ARMANDO_GEMINI_API_KEY", "YOUR_GEMINI_API_KEY");
         std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "YOUR_ANTHROPIC_API_KEY");
 
-        let mut config = Config::default();
-        config.chatgpt = Some(ChatGptConfig {
-            api_key: "keep-openai".to_string(),
-            model: "gpt-4o-mini".to_string(),
-        });
-        config.gemini = Some(GeminiConfig {
-            api_key: "keep-gemini".to_string(),
-            model: "gemini-1.5-flash".to_string(),
-        });
-        config.claude = Some(ClaudeConfig {
-            api_key: "keep-claude".to_string(),
-            model: "claude-3-5-sonnet-latest".to_string(),
-        });
+        let mut config = Config {
+            chatgpt: Some(ChatGptConfig {
+                api_key: "keep-openai".to_string(),
+                model: "gpt-4o-mini".to_string(),
+            }),
+            gemini: Some(GeminiConfig {
+                api_key: "keep-gemini".to_string(),
+                model: "gemini-1.5-flash".to_string(),
+            }),
+            claude: Some(ClaudeConfig {
+                api_key: "keep-claude".to_string(),
+                model: "claude-3-5-sonnet-latest".to_string(),
+            }),
+            ..Default::default()
+        };
 
         apply_env_overrides(&mut config);
 
@@ -575,19 +621,21 @@ rag:
         std::env::set_var("ARMANDO_GEMINI_API_KEY", "from-env-gemini");
         std::env::set_var("ARMANDO_ANTHROPIC_API_KEY", "from-env-claude");
 
-        let mut config = Config::default();
-        config.chatgpt = Some(ChatGptConfig {
-            api_key: "from-file-openai".to_string(),
-            model: "gpt-4o-mini".to_string(),
-        });
-        config.gemini = Some(GeminiConfig {
-            api_key: "from-file-gemini".to_string(),
-            model: "gemini-1.5-flash".to_string(),
-        });
-        config.claude = Some(ClaudeConfig {
-            api_key: "from-file-claude".to_string(),
-            model: "claude-3-5-sonnet-latest".to_string(),
-        });
+        let mut config = Config {
+            chatgpt: Some(ChatGptConfig {
+                api_key: "from-file-openai".to_string(),
+                model: "gpt-4o-mini".to_string(),
+            }),
+            gemini: Some(GeminiConfig {
+                api_key: "from-file-gemini".to_string(),
+                model: "gemini-1.5-flash".to_string(),
+            }),
+            claude: Some(ClaudeConfig {
+                api_key: "from-file-claude".to_string(),
+                model: "claude-3-5-sonnet-latest".to_string(),
+            }),
+            ..Default::default()
+        };
 
         apply_env_overrides(&mut config);
 
@@ -629,8 +677,10 @@ rag:
         std::fs::create_dir_all(&temp_dir).unwrap();
         let path = temp_dir.join("default.yaml");
 
-        let mut config = Config::default();
-        config.loaded_from = Some(path.clone());
+        let mut config = Config {
+            loaded_from: Some(path.clone()),
+            ..Default::default()
+        };
         apply_env_overrides(&mut config);
         config.save().unwrap();
 
@@ -692,8 +742,10 @@ rag:
         std::fs::create_dir_all(&temp_dir).unwrap();
         let path = temp_dir.join("default.yaml");
 
-        let mut config = Config::default();
-        config.loaded_from = Some(path.clone());
+        let mut config = Config {
+            loaded_from: Some(path.clone()),
+            ..Default::default()
+        };
         apply_env_overrides(&mut config);
         config.save().unwrap();
 
