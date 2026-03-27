@@ -1,6 +1,6 @@
 [package]
 name = "armando"
-version = "0.0.2-rc5"
+version = "0.0.2-rc6"
 edition = "2021"
 
 [[bin]]
