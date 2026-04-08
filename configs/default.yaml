@@ -14,7 +14,7 @@ logging:
 update:
   beta: false
 rag:
-  enabled: true
+  enabled: false
   engine: langchain
   mode: vector
   documents_folder: YOUR_RAG_DOCUMENTS_FOLDER
@@ -28,7 +28,7 @@ rag:
   langchain_retry_count: 1
 gemini:
   api_key: YOUR_GEMINI_API_KEY
-  model: gemini-2.5-flash
+  model: ''
 chatgpt:
   api_key: YOUR_OPENAI_API_KEY
   model: gpt-4o-mini
@@ -37,4 +37,4 @@ claude:
   model: claude-3-5-sonnet-latest
 ollama:
   base_url: http://localhost:11434
-  model: tinyllama
+  model: gemma4:e2b

@@ -202,6 +202,10 @@ pub(super) fn copy_text_to_clipboard(text: &str) {
     }
 }
 
+pub(super) fn copy_markdown_rendered_text_to_clipboard(text: &str) {
+    copy_text_to_clipboard(&super::markdown::markdown_to_rendered_text(text));
+}
+
 pub(super) fn begin_voice_recording() -> Result<VoiceRecording, String> {
     let path = std::env::temp_dir().join(format!(
         "armando-dictation-{}-{}.wav",
@@ -276,4 +280,30 @@ fn command_exists(name: &str) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::gui::markdown::markdown_to_rendered_text;
+
+    #[test]
+    fn markdown_copy_converts_headers_lists_and_inline_styles() {
+        let input = "# Title\n- **Bold** item\n2. `code` item\n> *note*\n";
+        let output = markdown_to_rendered_text(input);
+        assert_eq!(output, "Title\n• Bold item\n2. code item\nnote");
+    }
+
+    #[test]
+    fn markdown_copy_keeps_code_block_content_without_fences() {
+        let input = "before\n```rust\nlet x = 1;\n```\nafter";
+        let output = markdown_to_rendered_text(input);
+        assert_eq!(output, "before\nlet x = 1;\nafter");
+    }
+
+    #[test]
+    fn markdown_copy_expands_single_link_lines() {
+        let input = "[Armando](https://github.com/Inoxiamo/armando)";
+        let output = markdown_to_rendered_text(input);
+        assert_eq!(output, "Armando (https://github.com/Inoxiamo/armando)");
+    }
 }

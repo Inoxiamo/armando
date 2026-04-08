@@ -17,8 +17,35 @@ Work should be proposed and executed two items at a time.
 ### Phase 2 Follow-ups
 
 - [ ] Finish the remaining `src/backends/mod.rs` wiring after extracting `health.rs` and `models.rs`
-- [ ] Finish the GUI module wiring around `settings_panel`, `history_panel`, `provider_settings`, and `rag_settings`
-- [ ] Keep Phase 2 merges gated by `cargo fmt`, `cargo test`, and the current UI smoke checklist
+- [x] Finish the GUI module wiring around `settings_panel`, `history_panel`, `provider_settings`, and `rag_settings`
+- [x] Keep Phase 2 merges gated by `cargo fmt`, `cargo test`, and the current UI smoke checklist
+
+## Non-Beta Roadmap v2 (3 Sprints)
+
+Legend: `P0` critical path, `P1` important, `P2` polish.
+Owner labels: `backend`, `gui`, `qa`, `release`, `docs`.
+
+### Sprint 1 - Stabilization and Guardrails
+
+- [x] `P0` `backend` Close the remaining `src/backends/mod.rs` wiring and remove duplicate prompt-preparation paths
+- [x] `P0` `gui` Close GUI module wiring for `settings_panel`, `history_panel`, `provider_settings`, and `rag_settings`
+- [x] `P0` `qa` Add dedicated CLI regression tests for `--ask`, `--stdin`, `--json`, `--request`, and mode flags
+- [x] `P0` `qa` Enforce merge gates on every Phase 2 branch: `cargo fmt`, `cargo test --all-targets`, UI smoke checklist
+
+### Sprint 2 - UX and Prompt Productivity
+
+- [ ] `P1` `gui` Final refinement pass on `NERV HUD` with focused accessibility and contrast checks
+- [ ] `P1` `backend` Add prompt/snippet templates with reusable examples for text-assist and generic-question flows
+- [ ] `P1` `backend` Expand preset overrides (language, tone, output-shape) with complete docs and startup validation
+- [ ] `P1` `gui` Improve status and quick-action components for backend readiness, recovery, and command feedback
+
+### Sprint 3 - Distribution Hardening (Toward 1.0)
+
+- [ ] `P0` `release` Complete release notes and distribution changelog workflow with a release-ready checklist
+- [ ] `P1` `release` Keep CI/release pipeline lean with cache/concurrency validation and artifact integrity checks
+- [ ] `P1` `docs` Align docs (`README`, install, release, troubleshooting) with current CLI and config defaults
+- [ ] `P2` `qa` Prepare a 1.0 freeze checklist: regression pass, packaging verification, and rollback notes
+- [x] `P0` `qa` Add a versioned `pre-push` non-regression gate (`fmt` + `test` + UI smoke checklist), with selectable `quick/default/full` profiles
 
 ## Milestone 0.1 - Working Core
 
@@ -67,6 +94,10 @@ Work should be proposed and executed two items at a time.
 
 ## Milestone 0.5 - Beta Integrations
 
+
+- [x] Allow use command inside terminal and CLI mode
+- [x] Automatic switch from standard to general question mode with the prompt tag `GENERIC`
+- [x] Optimize the prepromt to use the text language of the reqeust, if not explicitly set into the preprompt (Optimize token gestion and cost)
 - [ ] Beta terminal mode with proposed command plus explicit user confirmation
 - [ ] Beta MCP client integration for tools and external context
 - [ ] Beta tools panel covering `terminal`, `CLI`, `MCP`, and AI backend status

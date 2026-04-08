@@ -1,5 +1,4 @@
 use eframe::egui;
-use egui::text::{CCursor, CCursorRange};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -23,11 +22,16 @@ use crate::window_context;
 mod history_entry;
 mod history_panel;
 mod layout;
+mod markdown;
 mod media_io;
+mod prompt_panel;
 mod provider_settings;
 mod rag_settings;
+mod response_panel;
 mod settings_panel;
 mod startup_health;
+mod status_panel;
+mod top_controls;
 mod update_status;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -1349,7 +1353,7 @@ impl AiPopupApp {
             return;
         }
 
-        media_io::copy_text_to_clipboard(&self.response);
+        media_io::copy_markdown_rendered_text_to_clipboard(&self.response);
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
@@ -1515,17 +1519,17 @@ fn render_main_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::U
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                render_top_controls(app, ctx, ui);
+                top_controls::render_top_controls(app, ctx, ui);
                 ui.add_space(12.0);
-                render_prompt_section(app, ctx, ui);
-                if status_section_has_content(app) {
+                prompt_panel::render_prompt_section(app, ctx, ui);
+                if status_panel::status_section_has_content(app) {
                     ui.add_space(10.0);
-                    render_status_section(app, ui);
+                    status_panel::render_status_section(app, ui);
                     ui.add_space(16.0);
                 } else {
                     ui.add_space(12.0);
                 }
-                render_response_section(app, ctx, ui);
+                response_panel::render_response_section(app, ctx, ui);
 
                 if !app.session_history_entries.is_empty() {
                     ui.add_space(16.0);
@@ -1538,436 +1542,6 @@ fn render_main_panel(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::U
                 }
             });
         });
-}
-
-fn status_section_has_content(app: &AiPopupApp) -> bool {
-    status_section_has_content_state(
-        !app.attachments.is_empty(),
-        app.dictation_status.is_some(),
-        app.attachment_notice.is_some(),
-        app.attachment_error.is_some(),
-        app.settings_notice.is_some(),
-        app.settings_error.is_some(),
-    )
-}
-
-fn status_section_has_content_state(
-    has_attachments: bool,
-    has_dictation_status: bool,
-    has_attachment_notice: bool,
-    has_attachment_error: bool,
-    has_settings_notice: bool,
-    has_settings_error: bool,
-) -> bool {
-    has_attachments
-        || has_dictation_status
-        || has_attachment_notice
-        || has_attachment_error
-        || has_settings_notice
-        || has_settings_error
-}
-
-fn render_top_controls(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    let backend_label = app.tr("app.backend");
-    let generic_mode_label = app.tr("app.generic_mode");
-    let session_chat_label = app.tr("app.session_chat_mode");
-    let settings_open_label = app.tr("app.settings");
-
-    ui.horizontal(|ui| {
-        ui.label(muted_label(&backend_label, app.theme.weak_text_color));
-        let backend_button = dropdown_button_text(&app.selected_backend, &app.theme);
-        dropdown_box_scope(ui, &app.theme, |ui| {
-            egui::ComboBox::from_id_source("backend_combo")
-                .selected_text(backend_button)
-                .width(148.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &app.theme);
-                    dropdown_option(ui, &mut app.selected_backend, "ollama", &app.theme);
-                    dropdown_option(ui, &mut app.selected_backend, "chatgpt", &app.theme);
-                    dropdown_option(ui, &mut app.selected_backend, "claude", &app.theme);
-                    dropdown_option(ui, &mut app.selected_backend, "gemini", &app.theme);
-                });
-        });
-        ui.add_space(6.0);
-        ui.checkbox(&mut app.generic_question_mode, generic_mode_label);
-        ui.add_space(6.0);
-        ui.checkbox(&mut app.session_chat_enabled, session_chat_label);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(layout::section_actions_right_inset());
-            let gear = icon_action_button(
-                app,
-                ToolbarIcon::Settings,
-                app.theme.panel_fill_soft,
-                app.theme.text_color,
-            );
-            if ui.add(gear).on_hover_text(settings_open_label).clicked() {
-                app.set_settings_visibility(ctx, !app.show_settings);
-            }
-        });
-    });
-}
-
-fn render_prompt_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    let prompt_section_label = app.tr("app.prompt");
-    let prompt_id = ui.make_persistent_id("prompt_input");
-
-    ui.horizontal(|ui| {
-        ui.label(section_label(&prompt_section_label, app.theme.text_color));
-        ui.add_space(8.0);
-        let can_toggle_rag = rag_toggle_available(&app.config);
-        let rag_button = ui
-            .add_enabled(
-                can_toggle_rag,
-                egui::Button::new(egui::RichText::new("RAG").strong())
-                    .fill(if app.config.rag.enabled {
-                        app.theme.accent_color
-                    } else {
-                        app.theme.panel_fill_soft
-                    })
-                    .stroke(egui::Stroke::new(1.0, app.theme.border_color)),
-            )
-            .on_hover_text(if can_toggle_rag {
-                "Toggle RAG"
-            } else {
-                "RAG requires an existing SQLite DB file"
-            });
-        if rag_button.clicked() {
-            app.config.rag.enabled = !app.config.rag.enabled;
-            app.persist_settings();
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(layout::section_actions_right_inset());
-            let send_clicked = ui
-                .add_enabled(
-                    !app.is_loading,
-                    icon_action_button(
-                        app,
-                        ToolbarIcon::Send,
-                        app.theme.accent_color,
-                        app.theme.accent_text_color,
-                    ),
-                )
-                .on_hover_text(app.tr("app.send"))
-                .clicked();
-            if send_clicked {
-                app.submit_prompt(ctx);
-            }
-
-            if !app.attachments.is_empty()
-                && ui
-                    .add(icon_action_button(
-                        app,
-                        ToolbarIcon::Clear,
-                        app.theme.panel_fill_soft,
-                        app.theme.text_color,
-                    ))
-                    .on_hover_text(app.tr("app.clear_images"))
-                    .clicked()
-            {
-                app.clear_attachments();
-            }
-
-            let voice_icon = if app.voice_recording.is_some() {
-                ToolbarIcon::Stop
-            } else {
-                ToolbarIcon::Mic
-            };
-            let voice_label = if app.voice_recording.is_some() {
-                app.tr("app.voice_stop")
-            } else {
-                app.tr("app.voice_start")
-            };
-            if ui
-                .add(icon_action_button(
-                    app,
-                    voice_icon,
-                    app.theme.panel_fill_soft,
-                    app.theme.text_color,
-                ))
-                .on_hover_text(voice_label)
-                .clicked()
-            {
-                app.toggle_dictation(ctx);
-            }
-
-            if ui
-                .add(icon_action_button(
-                    app,
-                    ToolbarIcon::PasteImage,
-                    app.theme.panel_fill_soft,
-                    app.theme.text_color,
-                ))
-                .on_hover_text(app.tr("app.paste_image"))
-                .clicked()
-            {
-                app.attach_image_from_clipboard();
-            }
-
-            if ui
-                .add(icon_action_button(
-                    app,
-                    ToolbarIcon::AttachImage,
-                    app.theme.panel_fill_soft,
-                    app.theme.text_color,
-                ))
-                .on_hover_text(app.tr("app.attach_image"))
-                .clicked()
-            {
-                app.attach_image_from_file();
-            }
-        });
-    });
-    ui.add_space(4.0);
-
-    let prompt_hint = app.tr("app.prompt_hint");
-    let prompt_max_height = editor_max_height(ctx, 88.0);
-    app.prompt_editor_height = app.prompt_editor_height.clamp(88.0, prompt_max_height);
-    let prompt_before_edit = app.prompt.clone();
-    let input_output = input_frame(ctx, app.theme.panel_fill).show(ui, |ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), app.prompt_editor_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_min_height(app.prompt_editor_height);
-                egui::TextEdit::multiline(&mut app.prompt)
-                    .id(prompt_id)
-                    .hint_text(prompt_hint)
-                    .desired_width(f32::INFINITY)
-                    .show(ui)
-            },
-        )
-        .inner
-    });
-    let input_output = input_output.inner;
-    let input_resp = &input_output.response;
-
-    if !app.prompt_focus_initialized {
-        input_resp.request_focus();
-
-        let mut state = input_output.state.clone();
-        state
-            .cursor
-            .set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(0))));
-        state.store(ctx, prompt_id);
-
-        app.prompt_focus_initialized = true;
-        ctx.request_repaint();
-    }
-
-    let prompt_has_focus = input_resp.has_focus() || ctx.memory(|mem| mem.has_focus(prompt_id));
-
-    let submit_with_shift_enter = prompt_has_focus
-        && ctx.input(|i| {
-            i.key_pressed(egui::Key::Enter)
-                && i.modifiers.shift
-                && !i.modifiers.ctrl
-                && !i.modifiers.alt
-                && !i.modifiers.command
-        });
-
-    if submit_with_shift_enter {
-        app.prompt = prompt_before_edit.clone();
-        app.submit_prompt(ctx);
-    }
-
-    let submit_with_copy_close = ctx.input(|i| {
-        i.key_pressed(egui::Key::Enter)
-            && (i.modifiers.ctrl || i.modifiers.command)
-            && !i.modifiers.shift
-            && !i.modifiers.alt
-    });
-
-    if submit_with_copy_close {
-        app.prompt = prompt_before_edit.clone();
-        app.auto_copy_close_after_response = true;
-        app.submit_prompt(ctx);
-    }
-
-    let paste_shortcut_pressed = ctx.input(|i| {
-        i.key_pressed(egui::Key::V)
-            && (i.modifiers.ctrl || i.modifiers.command)
-            && !i.modifiers.shift
-            && !i.modifiers.alt
-    });
-    let paste_action = ctx.input(|i| media_io::classify_prompt_paste_events(&i.events));
-
-    if prompt_has_focus {
-        if let Some(path) = paste_action.image_path_from_paste {
-            if let Ok(attachment) = media_io::load_image_attachment_from_path(&path) {
-                app.attachments.push(attachment);
-                app.prompt = prompt_before_edit;
-            }
-        } else if media_io::should_attach_clipboard_image_from_shortcut(
-            paste_shortcut_pressed,
-            &prompt_before_edit,
-            &app.prompt,
-        ) {
-            let _ = app.try_attach_image_from_clipboard(false);
-        }
-    }
-
-    let prompt_helper_text = if app.is_loading {
-        app.tr_with(
-            "app.helper_waiting",
-            &[("backend", app.selected_backend.clone())],
-        )
-    } else {
-        app.tr("app.helper_ready")
-    };
-    editor_resize_row(
-        ui,
-        &app.theme,
-        &mut app.prompt_editor_height,
-        88.0,
-        prompt_max_height,
-        Some(prompt_helper_text.as_str()),
-    );
-}
-
-fn render_status_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
-    card_frame(
-        ui.ctx(),
-        app.theme.panel_fill_soft,
-        app.theme.border_color.gamma_multiply(0.65),
-    )
-    .show(ui, |ui| {
-        if !app.attachments.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    egui::RichText::new(app.tr_with(
-                        "app.images_attached",
-                        &[("count", app.attachments.len().to_string())],
-                    ))
-                    .small()
-                    .color(app.theme.weak_text_color),
-                );
-                for image in &app.attachments {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} ({})",
-                            image.name,
-                            media_io::format_size(image.size_bytes)
-                        ))
-                        .small()
-                        .color(app.theme.text_color),
-                    );
-                }
-            });
-            ui.add_space(6.0);
-        }
-
-        if let Some(status) = &app.dictation_status {
-            ui.label(muted_label(status, app.theme.weak_text_color));
-        }
-        if let Some(notice) = &app.attachment_notice {
-            ui.add_space(4.0);
-            ui.label(muted_label(notice, app.theme.weak_text_color));
-        }
-        if let Some(notice) = &app.settings_notice {
-            ui.add_space(4.0);
-            ui.label(muted_label(notice, app.theme.weak_text_color));
-        }
-        if let Some(error) = &app.attachment_error {
-            ui.add_space(4.0);
-            ui.colored_label(app.theme.danger_color, error);
-        }
-        if let Some(error) = &app.settings_error {
-            ui.add_space(4.0);
-            ui.colored_label(app.theme.danger_color, error);
-        }
-    });
-}
-
-fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    let response_section_label = app.tr("app.response");
-
-    ui.horizontal(|ui| {
-        ui.label(section_label(&response_section_label, app.theme.text_color));
-        if app.is_loading {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(app.tr("app.generating"))
-                    .small()
-                    .color(app.theme.weak_text_color),
-            );
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(layout::section_actions_right_inset());
-            let history_count = app.history_entries.len();
-            let history_label = if app.show_history {
-                app.tr_with("app.hide_history", &[("count", history_count.to_string())])
-            } else {
-                app.tr_with("app.show_history", &[("count", history_count.to_string())])
-            };
-
-            if ui
-                .add_enabled(
-                    app.config.history.enabled,
-                    icon_action_button(
-                        app,
-                        if app.show_history {
-                            ToolbarIcon::HistoryOpen
-                        } else {
-                            ToolbarIcon::History
-                        },
-                        if app.show_history {
-                            app.theme.panel_fill_soft
-                        } else {
-                            app.theme.panel_fill
-                        },
-                        app.theme.text_color,
-                    ),
-                )
-                .on_hover_text(history_label)
-                .clicked()
-            {
-                app.set_history_visibility(ctx, !app.show_history);
-            }
-
-            if ui
-                .add_enabled(
-                    !app.response.is_empty(),
-                    icon_action_button(
-                        app,
-                        ToolbarIcon::Copy,
-                        app.theme.panel_fill_soft,
-                        app.theme.text_color,
-                    ),
-                )
-                .on_hover_text(app.tr("app.copy_response"))
-                .clicked()
-            {
-                media_io::copy_text_to_clipboard(&app.response);
-            }
-        });
-    });
-    ui.add_space(4.0);
-
-    let response_max_height = editor_max_height(ctx, 140.0);
-    app.response_editor_height = app.response_editor_height.clamp(84.0, response_max_height);
-    input_frame(ctx, app.theme.panel_fill).show(ui, |ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), app.response_editor_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_min_height(app.response_editor_height);
-                ui.add_sized(
-                    egui::vec2(ui.available_width(), app.response_editor_height),
-                    egui::TextEdit::multiline(&mut app.response.as_str())
-                        .desired_width(f32::INFINITY)
-                        .font(egui::TextStyle::Monospace),
-                );
-            },
-        );
-    });
-    editor_resize_row(
-        ui,
-        &app.theme,
-        &mut app.response_editor_height,
-        84.0,
-        response_max_height,
-        None,
-    );
 }
 
 fn section_label(text: &str, color: egui::Color32) -> egui::RichText {
@@ -2120,7 +1694,10 @@ impl egui::Widget for IconActionButton {
                 self.stroke_color
             },
         );
-        let prefer_vector = matches!(self.icon, ToolbarIcon::History | ToolbarIcon::HistoryOpen);
+        let prefer_vector = matches!(
+            self.icon,
+            ToolbarIcon::History | ToolbarIcon::HistoryOpen | ToolbarIcon::Copy
+        );
 
         ui.painter()
             .rect(rect, egui::Rounding::same(10.0), fill, egui::Stroke::NONE);
@@ -2518,211 +2095,6 @@ fn input_frame(ctx: &egui::Context, fill: egui::Color32) -> egui::Frame {
         .inner_margin(egui::Margin::same(9.0))
 }
 
-fn render_startup_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
-    egui::CollapsingHeader::new(
-        egui::RichText::new(app.tr("settings.health"))
-            .color(app.theme.text_color)
-            .strong(),
-    )
-    .id_source("settings_startup_health")
-    .default_open(false)
-    .show(ui, |ui| {
-        startup_health::render_startup_health_section(app, ui);
-
-        if app.config.loaded_from.is_none() {
-            ui.add_space(12.0);
-            startup_health::render_first_run_setup_section(app, ui);
-        }
-    });
-}
-
-fn render_update_status(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    update_status::render_update_status(app, ctx, ui);
-}
-
-fn render_general_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    egui::CollapsingHeader::new(
-        egui::RichText::new(app.tr("settings.general"))
-            .color(app.theme.text_color)
-            .strong(),
-    )
-    .id_source("settings_general")
-    .default_open(false)
-    .show(ui, |ui| {
-        ui.label(muted_label(
-            &app.tr("settings.language"),
-            app.theme.weak_text_color,
-        ));
-        let current_language = app
-            .available_locales
-            .iter()
-            .find(|locale| locale.code == app.i18n.code())
-            .map(|locale| locale.name.clone())
-            .unwrap_or_else(|| app.i18n.language_name().to_string());
-        let dropdown_theme = app.theme.clone();
-        dropdown_box_scope(ui, &dropdown_theme, |ui| {
-            egui::ComboBox::from_id_source("settings_language")
-                .selected_text(dropdown_button_text(&current_language, &dropdown_theme))
-                .width(220.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &dropdown_theme);
-                    let locales: Vec<(String, String)> = app
-                        .available_locales
-                        .iter()
-                        .map(|locale| (locale.code.clone(), locale.name.clone()))
-                        .collect();
-                    for (code, name) in locales {
-                        if ui
-                            .selectable_label(
-                                app.config.ui.language == code,
-                                dropdown_item_text(&name, &dropdown_theme),
-                            )
-                            .clicked()
-                        {
-                            app.apply_language(&code);
-                            app.persist_settings();
-                        }
-                    }
-                });
-        });
-
-        ui.add_space(8.0);
-        ui.label(muted_label(
-            &app.tr("settings.theme"),
-            app.theme.weak_text_color,
-        ));
-        let current_theme = app.config.theme.name.clone();
-        let dropdown_theme = app.theme.clone();
-        dropdown_box_scope(ui, &dropdown_theme, |ui| {
-            egui::ComboBox::from_id_source("settings_theme")
-                .selected_text(dropdown_button_text(&current_theme, &dropdown_theme))
-                .width(220.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &dropdown_theme);
-                    let themes = app.available_themes.clone();
-                    for theme_name in themes {
-                        if ui
-                            .selectable_label(
-                                app.config.theme.name == theme_name,
-                                dropdown_item_text(&theme_name, &dropdown_theme),
-                            )
-                            .clicked()
-                        {
-                            app.apply_theme_by_name(ctx, &theme_name);
-                            app.persist_settings();
-                        }
-                    }
-                });
-        });
-
-        ui.add_space(8.0);
-        ui.label(muted_label(
-            &app.tr("settings.default_backend"),
-            app.theme.weak_text_color,
-        ));
-        let dropdown_theme = app.theme.clone();
-        dropdown_box_scope(ui, &dropdown_theme, |ui| {
-            egui::ComboBox::from_id_source("settings_default_backend")
-                .selected_text(dropdown_button_text(
-                    &app.config.default_backend,
-                    &dropdown_theme,
-                ))
-                .width(220.0)
-                .show_ui(ui, |ui| {
-                    apply_dropdown_menu_style(ui, &dropdown_theme);
-                    for backend in ["ollama", "chatgpt", "claude", "gemini"] {
-                        if ui
-                            .selectable_label(
-                                app.config.default_backend == backend,
-                                dropdown_item_text(backend, &dropdown_theme),
-                            )
-                            .clicked()
-                        {
-                            app.config.default_backend = backend.to_string();
-                            app.selected_backend = backend.to_string();
-                            app.persist_settings();
-                        }
-                    }
-                });
-        });
-
-        ui.add_space(8.0);
-        let mut auto_read = app.config.auto_read_selection;
-        if ui
-            .checkbox(&mut auto_read, app.tr("settings.auto_read_selection"))
-            .changed()
-        {
-            app.config.auto_read_selection = auto_read;
-            app.persist_settings();
-        }
-
-        ui.add_space(8.0);
-        let mut update_beta = app.config.update.beta;
-        if ui
-            .checkbox(&mut update_beta, app.tr("settings.update_beta_channel"))
-            .changed()
-        {
-            app.config.update.beta = update_beta;
-            app.persist_settings();
-            app.start_release_check(ctx);
-        }
-        ui.label(muted_label(
-            &app.tr("settings.update_beta_channel_hint"),
-            app.theme.weak_text_color,
-        ));
-    });
-}
-
-fn render_history_debug_settings_section(app: &mut AiPopupApp, ui: &mut egui::Ui) {
-    egui::CollapsingHeader::new(
-        egui::RichText::new(app.tr("settings.history_debug"))
-            .color(app.theme.text_color)
-            .strong(),
-    )
-    .id_source("settings_history_debug")
-    .default_open(false)
-    .show(ui, |ui| {
-        let mut history_enabled = app.config.history.enabled;
-        if ui
-            .checkbox(&mut history_enabled, app.tr("settings.history_enabled"))
-            .changed()
-        {
-            app.config.history.enabled = history_enabled;
-            if !history_enabled {
-                app.show_history = false;
-            }
-            app.reload_history();
-            app.persist_settings();
-        }
-        ui.label(muted_label(
-            &app.tr("settings.history_warning"),
-            app.theme.weak_text_color,
-        ));
-
-        ui.add_space(8.0);
-        let mut debug_logging = app.config.logging.enabled;
-        if ui
-            .checkbox(&mut debug_logging, app.tr("settings.debug_logging"))
-            .changed()
-        {
-            app.config.logging.enabled = debug_logging;
-            app.persist_settings();
-        }
-        ui.label(muted_label(
-            &app.tr("settings.debug_logging_warning"),
-            app.theme.weak_text_color,
-        ));
-    });
-}
-
-fn render_rag_settings_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    rag_settings::render_rag_settings_section(app, ctx, ui);
-}
-
-fn render_provider_settings_sections(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    provider_settings::render_provider_settings_sections(app, ctx, ui);
-}
-
 fn settings_text_field(
     ui: &mut egui::Ui,
     theme: &ResolvedTheme,
@@ -3118,7 +2490,7 @@ mod tests {
             name = state.name,
             min_inner = format_vec2(min_inner_size),
             requested_inner = format_optional_vec2(requested_inner_size),
-            status = status_section_has_content_state(
+            status = status_panel::status_section_has_content_state(
                 state.attachments > 0,
                 state.dictation_status,
                 state.attachment_notice,
@@ -3232,25 +2604,25 @@ history_open_with_feedback
 
     #[test]
     fn status_section_visibility_reacts_to_any_message_or_error_state() {
-        assert!(!status_section_has_content_state(
+        assert!(!status_panel::status_section_has_content_state(
             false, false, false, false, false, false
         ));
-        assert!(status_section_has_content_state(
+        assert!(status_panel::status_section_has_content_state(
             true, false, false, false, false, false
         ));
-        assert!(status_section_has_content_state(
+        assert!(status_panel::status_section_has_content_state(
             false, true, false, false, false, false
         ));
-        assert!(status_section_has_content_state(
+        assert!(status_panel::status_section_has_content_state(
             false, false, true, false, false, false
         ));
-        assert!(status_section_has_content_state(
+        assert!(status_panel::status_section_has_content_state(
             false, false, false, true, false, false
         ));
-        assert!(status_section_has_content_state(
+        assert!(status_panel::status_section_has_content_state(
             false, false, false, false, true, false
         ));
-        assert!(status_section_has_content_state(
+        assert!(status_panel::status_section_has_content_state(
             false, false, false, false, false, true
         ));
     }

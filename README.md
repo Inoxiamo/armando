@@ -31,6 +31,28 @@ chmod +x .githooks/pre-commit
 
 The local installer (`scripts/dev/install-local.sh`) applies this automatically.
 
+### Pre-push Non-Regression Gate
+
+The repository also ships a versioned git hook at `.githooks/pre-push` that runs non-regression checks before push.
+Default profile:
+
+- `cargo fmt --all -- --check`
+- `cargo test --locked --all-targets`
+- `scripts/ci/verify-ui-smoke-checklist.sh`
+
+Tune the profile when needed:
+
+```bash
+ARMANDO_PRE_PUSH_PROFILE=quick git push   # fmt + tests
+ARMANDO_PRE_PUSH_PROFILE=full git push    # fmt + tests + clippy
+```
+
+Emergency bypass (local only, use sparingly):
+
+```bash
+SKIP_PRE_PUSH_REGRESSION=1 git push
+```
+
 ## Get armando
 
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>
@@ -196,10 +218,26 @@ To pre-index documents offline:
 cargo run -- --rag-index
 ```
 
+## CLI Mode
+
+`armando` can run directly in terminal without opening the UI.
+
+Examples:
+
+```bash
+armando --ask "GENERIC: explain what docker compose does"
+armando --ask "CMD: list files sorted by size in current folder"
+printf "WORK: rewrite this update for a customer" | armando --stdin --text-assist
+armando --ask "CMD: show top 5 memory processes on Linux" --json
+armando --ask "GENERIC: explain rust ownership" --request
+```
+
+CLI defaults to `Generic question` mode for lower token usage. You can force mode with `--generic` or `--text-assist`, override backend with `--backend <name>`, emit machine-readable output with `--json`, and print the exact prepared request sent to the model with `--request`.
+
 ## Prompt Presets
 
 Text-assist tags such as `WORK`, `EMAIL`, `FORMAL`, `SHORT`, and `CMD` are loaded from `configs/prompts/prompt-tags.yaml` (fallback: `prompt-tags.yaml`).
-Generic-question presets such as `CMD:` are loaded from `configs/prompts/generic-prompts.yaml` (fallback: `generic-prompts.yaml`).
+Generic-question presets such as `GENERIC:` and `CMD:` are loaded from `configs/prompts/generic-prompts.yaml` (fallback: `generic-prompts.yaml`).
 Language selection is handled centrally by the app, with support for explicit tags such as `EN`, `ENG`, `ITALIAN`, `ESP`, `FRA`, `DEU`, `JPN`, and many other common aliases.
 
 Both files are read only at startup. The merge order is:
@@ -221,12 +259,15 @@ Example `configs/prompts/generic-prompts.yaml`:
 
 ```yaml
 tags:
+  GENERIC:
+    instruction: ""
+    strip_header: true
   CMD:
     instruction: "If the requested answer is a shell command or terminal one-liner, return only the final command, with no Markdown, no backticks, and no extra text."
     strip_header: true
 ```
 
-If no explicit language tag is provided, `armando` keeps the language of the source text in text-assist mode and answers in the user's request language in generic-question mode.
+If no explicit language tag is provided, `armando` keeps the source language in text-assist mode and answers in the user request language in generic-question mode. Language changes are applied only when explicitly requested (for example translation requests).
 
 The old `aliases` section in the main config is still supported as a legacy fallback, but new presets should go into the dedicated files.
 

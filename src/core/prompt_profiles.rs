@@ -143,7 +143,7 @@ fn merge_generic_question_tags(
             continue;
         }
         let runtime = preset.into_runtime();
-        if runtime.instruction.trim().is_empty() {
+        if runtime.instruction.trim().is_empty() && !runtime.strip_header {
             continue;
         }
         target.insert(
@@ -217,13 +217,22 @@ fn built_in_text_assist_tags() -> HashMap<String, String> {
 }
 
 fn built_in_generic_question_tags() -> HashMap<String, GenericPromptTag> {
-    HashMap::from([(
-        "CMD".to_string(),
-        GenericPromptTag {
-            instruction: "If the requested answer is a shell command or terminal one-liner, return only the final command, with no Markdown, no backticks, and no extra text.".to_string(),
-            strip_header: true,
-        },
-    )])
+    HashMap::from([
+        (
+            "CMD".to_string(),
+            GenericPromptTag {
+                instruction: "If the requested answer is a shell command or terminal one-liner, return only the final command, with no Markdown, no backticks, and no extra text.".to_string(),
+                strip_header: true,
+            },
+        ),
+        (
+            "GENERIC".to_string(),
+            GenericPromptTag {
+                instruction: String::new(),
+                strip_header: true,
+            },
+        ),
+    ])
 }
 
 fn built_in_language_tags() -> HashMap<String, String> {

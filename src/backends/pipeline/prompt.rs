@@ -1,7 +1,7 @@
 use crate::backends::{ConversationTurn, PromptMode};
 use crate::prompt_profiles::{GenericPromptTag, PromptProfiles};
 use crate::rag::RetrievedDocument;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn prepare_prompt(
     prompt: &str,
@@ -26,11 +26,16 @@ pub(crate) fn prepare_prompt_with_retrieval(
     prompt: &str,
     conversation: &[ConversationTurn],
     prompt_profiles: &PromptProfiles,
-    mode: PromptMode,
+    requested_mode: PromptMode,
     has_images: bool,
     active_window_context: Option<&str>,
     retrieved_docs: &[RetrievedDocument],
 ) -> String {
+    let mode = resolve_prompt_mode(
+        requested_mode,
+        prompt,
+        &prompt_profiles.generic_question_tags,
+    );
     let (expanded_prompt, detected_tags) = match mode {
         PromptMode::TextAssist => expand_tags(
             prompt,
@@ -50,19 +55,13 @@ pub(crate) fn prepare_prompt_with_retrieval(
 
     let mut instructions = match mode {
         PromptMode::TextAssist => vec![
-            "Act as a text transformation assistant focused on rewriting, improving, correcting, translating, and adapting text.".to_string(),
-            "Treat the user's input as text to transform unless the user explicitly asks for something else.".to_string(),
-            "Produce a final version that is ready to copy and use directly in the target context.".to_string(),
-            "Preserve the original meaning while improving clarity, tone, grammar, syntax, and readability.".to_string(),
-            "Apply style, tone, and formatting instructions directly in the final text without explaining what you changed.".to_string(),
-            "Return only the final requested content.".to_string(),
-            "Do not add introductions, commentary, explanations, or closing remarks.".to_string(),
-            "Do not add quotation marks or special formatting unless explicitly requested.".to_string(),
+            "Act as a text transformation assistant.".to_string(),
+            "Rewrite and improve the provided text while preserving meaning.".to_string(),
+            "Apply requested tone/style directly and return only the final text.".to_string(),
         ],
-        PromptMode::GenericQuestion => vec![
-            // Keep it pure: minimal instructions to ensure it behaves as a chat model
-            "Answer the user's request accurately and directly.".to_string(),
-        ],
+        PromptMode::GenericQuestion => {
+            vec!["Answer the user's request accurately and directly.".to_string()]
+        }
     };
 
     match mode {
@@ -71,7 +70,8 @@ pub(crate) fn prepare_prompt_with_retrieval(
                 instructions.push(format!("Write the final output in {language}."));
             } else {
                 instructions.push(
-                    "Unless an explicit language tag is provided, keep the final output in the same language as the source text that follows the tags.".to_string(),
+                    "Unless an explicit language tag is provided, keep the final output in the same language as the source text that follows the tags. Change language only when the user explicitly asks for translation."
+                        .to_string(),
                 );
             }
         }
@@ -80,7 +80,8 @@ pub(crate) fn prepare_prompt_with_retrieval(
                 instructions.push(format!("Answer in {language}."));
             } else {
                 instructions.push(
-                    "Unless an explicit language tag is provided, answer in the same language as the user's request.".to_string(),
+                    "Unless an explicit language tag is provided, answer in the same language as the user's request. Change language only when the user explicitly asks for translation."
+                        .to_string(),
                 );
             }
         }
@@ -94,6 +95,7 @@ pub(crate) fn prepare_prompt_with_retrieval(
     }
 
     if let Some(active_window_context) = active_window_context {
+        let active_window_context = truncate_chars(active_window_context, 280);
         instructions.push(format!(
             "If relevant, use this active window context only as a hint: {active_window_context}."
         ));
@@ -112,16 +114,9 @@ pub(crate) fn prepare_prompt_with_retrieval(
         }
     }
 
-    if !detected_tags.is_empty() {
-        instructions.push(format!(
-            "Automatically apply these context instructions: {}.",
-            detected_tags.join(", ")
-        ));
-    }
-
     if !retrieved_docs.is_empty() {
         let mut context = String::new();
-        let total_limit = 8000;
+        let total_limit = retrieved_context_char_limit(mode);
 
         for (idx, doc) in retrieved_docs.iter().enumerate() {
             let doc_text = format!(
@@ -134,7 +129,7 @@ pub(crate) fn prepare_prompt_with_retrieval(
 
             if context.len() + doc_text.len() > total_limit {
                 if context.is_empty() {
-                    context = doc_text[..total_limit].to_string();
+                    context = truncate_chars(&doc_text, total_limit);
                 }
                 break;
             }
@@ -158,35 +153,126 @@ pub(crate) fn prepare_prompt_with_retrieval(
         expanded_prompt.trim().to_string()
     };
 
-    let conversation_block = if conversation.is_empty() {
-        String::new()
-    } else {
-        let turns = conversation
-            .iter()
-            .rev()
-            .take(8)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .map(|turn| {
-                format!(
-                    "User:\n{}\n\nAssistant:\n{}",
-                    turn.user_prompt.trim(),
-                    turn.assistant_response.trim()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n---\n\n");
-        format!(
-            "\n\nCurrent conversation context:\nUse these previous turns only as context for the ongoing conversation. Do not automatically reinterpret the new request as a text cleanup or transformation task unless the user explicitly asks for that.\n\n{turns}"
-        )
-    };
+    instructions = dedupe_instructions(instructions);
+    let conversation_block = build_conversation_block(conversation, mode);
 
     format!(
         "{}{}\n\nUser request:\n{effective_prompt}",
         instructions.join("\n"),
         conversation_block,
     )
+}
+
+fn dedupe_instructions(instructions: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for instruction in instructions {
+        let trimmed = instruction.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            deduped.push(trimmed.to_string());
+        }
+    }
+    deduped
+}
+
+fn retrieved_context_char_limit(mode: PromptMode) -> usize {
+    match mode {
+        PromptMode::TextAssist => 3200,
+        PromptMode::GenericQuestion => 6000,
+    }
+}
+
+fn conversation_char_limit(mode: PromptMode) -> usize {
+    match mode {
+        PromptMode::TextAssist => 1800,
+        PromptMode::GenericQuestion => 3200,
+    }
+}
+
+fn build_conversation_block(conversation: &[ConversationTurn], mode: PromptMode) -> String {
+    if conversation.is_empty() {
+        return String::new();
+    }
+
+    let mut selected_turns = Vec::new();
+    let mut budget = conversation_char_limit(mode);
+    let separator = "\n\n---\n\n";
+
+    for turn in conversation.iter().rev().take(8) {
+        let turn_text = format!(
+            "User:\n{}\n\nAssistant:\n{}",
+            turn.user_prompt.trim(),
+            turn.assistant_response.trim()
+        );
+        let turn_len = turn_text.chars().count();
+        let extra_sep = if selected_turns.is_empty() {
+            0
+        } else {
+            separator.chars().count()
+        };
+
+        if turn_len + extra_sep > budget {
+            if selected_turns.is_empty() {
+                let truncated = truncate_chars(&turn_text, budget.max(160));
+                if !truncated.trim().is_empty() {
+                    selected_turns.push(truncated);
+                }
+            }
+            break;
+        }
+
+        budget -= turn_len + extra_sep;
+        selected_turns.push(turn_text);
+    }
+
+    if selected_turns.is_empty() {
+        return String::new();
+    }
+
+    selected_turns.reverse();
+    let turns = selected_turns.join(separator);
+    format!(
+        "\n\nCurrent conversation context:\nUse these previous turns only as context for the ongoing conversation. Do not automatically reinterpret the new request as a text cleanup or transformation task unless the user explicitly asks for that.\n\n{turns}"
+    )
+}
+
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    input.chars().take(max_chars).collect()
+}
+
+pub(crate) fn resolve_prompt_mode(
+    requested_mode: PromptMode,
+    prompt: &str,
+    generic_tags: &HashMap<String, GenericPromptTag>,
+) -> PromptMode {
+    if requested_mode == PromptMode::TextAssist
+        && header_contains_force_generic(prompt, generic_tags)
+    {
+        PromptMode::GenericQuestion
+    } else {
+        requested_mode
+    }
+}
+
+fn header_contains_force_generic(
+    prompt: &str,
+    generic_tags: &HashMap<String, GenericPromptTag>,
+) -> bool {
+    let Some(colon_idx) = prompt.find(':') else {
+        return false;
+    };
+    let header = prompt[..colon_idx].trim();
+    if header.is_empty() {
+        return false;
+    }
+    let tags = parse_known_tags(header, |tag| generic_tags.contains_key(tag));
+    tags.iter().any(|tag| tag == "GENERIC")
 }
 
 pub(crate) fn expand_generic_question_prompt(
