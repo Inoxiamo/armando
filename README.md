@@ -31,6 +31,28 @@ chmod +x .githooks/pre-commit
 
 The local installer (`scripts/dev/install-local.sh`) applies this automatically.
 
+### Pre-push Non-Regression Gate
+
+The repository also ships a versioned git hook at `.githooks/pre-push` that runs non-regression checks before push.
+Default profile:
+
+- `cargo fmt --all -- --check`
+- `cargo test --locked --all-targets`
+- `scripts/ci/verify-ui-smoke-checklist.sh`
+
+Tune the profile when needed:
+
+```bash
+ARMANDO_PRE_PUSH_PROFILE=quick git push   # fmt + tests
+ARMANDO_PRE_PUSH_PROFILE=full git push    # fmt + tests + clippy
+```
+
+Emergency bypass (local only, use sparingly):
+
+```bash
+SKIP_PRE_PUSH_REGRESSION=1 git push
+```
+
 ## Get armando
 
 - Latest release: <https://github.com/Inoxiamo/armando/releases/latest>

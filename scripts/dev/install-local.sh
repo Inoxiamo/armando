@@ -189,6 +189,8 @@ install_config_file "${GENERIC_PROMPTS_SOURCE}" "${CONFIG_ROOT}/generic-prompts.
 
 if git -C "${ROOT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   chmod +x "${ROOT_DIR}/.githooks/pre-commit" 2>/dev/null || true
+  chmod +x "${ROOT_DIR}/.githooks/pre-push" 2>/dev/null || true
+  chmod +x "${ROOT_DIR}/scripts/ci/pre-push-regression.sh" 2>/dev/null || true
   git -C "${ROOT_DIR}" config core.hooksPath .githooks
 fi
 

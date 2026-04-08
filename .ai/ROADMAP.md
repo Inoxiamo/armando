@@ -45,6 +45,7 @@ Owner labels: `backend`, `gui`, `qa`, `release`, `docs`.
 - [ ] `P1` `release` Keep CI/release pipeline lean with cache/concurrency validation and artifact integrity checks
 - [ ] `P1` `docs` Align docs (`README`, install, release, troubleshooting) with current CLI and config defaults
 - [ ] `P2` `qa` Prepare a 1.0 freeze checklist: regression pass, packaging verification, and rollback notes
+- [x] `P0` `qa` Add a versioned `pre-push` non-regression gate (`fmt` + `test` + UI smoke checklist), with selectable `quick/default/full` profiles
 
 ## Milestone 0.1 - Working Core
 
