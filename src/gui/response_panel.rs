@@ -239,10 +239,12 @@ fn inline_markdown_job(
                 content,
                 size,
                 color,
-                true,
-                base_italics,
-                false,
-                app.theme.panel_fill_soft,
+                InlineSegmentStyle {
+                    bold: true,
+                    italics: base_italics,
+                    code: false,
+                    code_background: app.theme.panel_fill_soft,
+                },
             );
             continue;
         }
@@ -262,10 +264,12 @@ fn inline_markdown_job(
                 content,
                 size,
                 color,
-                false,
-                false,
-                true,
-                app.theme.panel_fill_soft,
+                InlineSegmentStyle {
+                    bold: false,
+                    italics: false,
+                    code: true,
+                    code_background: app.theme.panel_fill_soft,
+                },
             );
             continue;
         }
@@ -285,10 +289,12 @@ fn inline_markdown_job(
                 content,
                 size,
                 color,
-                false,
-                true,
-                false,
-                app.theme.panel_fill_soft,
+                InlineSegmentStyle {
+                    bold: false,
+                    italics: true,
+                    code: false,
+                    code_background: app.theme.panel_fill_soft,
+                },
             );
             continue;
         }
@@ -347,11 +353,21 @@ fn flush_plain_segment(
         &text,
         size,
         color,
-        bold,
-        italics,
-        code,
-        egui::Color32::TRANSPARENT,
+        InlineSegmentStyle {
+            bold,
+            italics,
+            code,
+            code_background: egui::Color32::TRANSPARENT,
+        },
     );
+}
+
+#[derive(Clone, Copy)]
+struct InlineSegmentStyle {
+    bold: bool,
+    italics: bool,
+    code: bool,
+    code_background: egui::Color32,
 }
 
 fn append_inline_segment(
@@ -359,32 +375,29 @@ fn append_inline_segment(
     text: &str,
     size: f32,
     color: egui::Color32,
-    bold: bool,
-    italics: bool,
-    code: bool,
-    code_background: egui::Color32,
+    style: InlineSegmentStyle,
 ) {
     if text.is_empty() {
         return;
     }
 
     let mut format = TextFormat {
-        font_id: if code {
+        font_id: if style.code {
             egui::FontId::monospace((size - 1.0).max(11.0))
         } else {
             egui::FontId::proportional(size)
         },
         color,
-        italics,
+        italics: style.italics,
         ..Default::default()
     };
 
-    if bold {
+    if style.bold {
         format.font_id = egui::FontId::proportional(size + 0.8);
     }
 
-    if code {
-        format.background = code_background;
+    if style.code {
+        format.background = style.code_background;
     }
 
     job.append(text, 0.0, format);
