@@ -28,7 +28,7 @@ rag:
   langchain_retry_count: 1
 gemini:
   api_key: YOUR_GEMINI_API_KEY
-  model: gemini-2.5-flash
+  model: ''
 chatgpt:
   api_key: YOUR_OPENAI_API_KEY
   model: gpt-4o-mini
