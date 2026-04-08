@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::text::{CCursor, CCursorRange};
+use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1349,7 +1349,7 @@ impl AiPopupApp {
             return;
         }
 
-        media_io::copy_text_to_clipboard(&self.response);
+        media_io::copy_markdown_rendered_text_to_clipboard(&self.response);
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
@@ -1937,7 +1937,7 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
                 .on_hover_text(app.tr("app.copy_response"))
                 .clicked()
             {
-                media_io::copy_text_to_clipboard(&app.response);
+                media_io::copy_markdown_rendered_text_to_clipboard(&app.response);
             }
         });
     });
@@ -1946,19 +1946,14 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
     let response_max_height = editor_max_height(ctx, 140.0);
     app.response_editor_height = app.response_editor_height.clamp(84.0, response_max_height);
     input_frame(ctx, app.theme.panel_fill).show(ui, |ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), app.response_editor_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_min_height(app.response_editor_height);
-                ui.add_sized(
-                    egui::vec2(ui.available_width(), app.response_editor_height),
-                    egui::TextEdit::multiline(&mut app.response.as_str())
-                        .desired_width(f32::INFINITY)
-                        .font(egui::TextStyle::Monospace),
-                );
-            },
-        );
+        ui.set_min_height(app.response_editor_height);
+        egui::ScrollArea::vertical()
+            .max_height(app.response_editor_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                render_markdown_like_response(app, ui);
+            });
     });
     editor_resize_row(
         ui,
@@ -1968,6 +1963,366 @@ fn render_response_section(app: &mut AiPopupApp, ctx: &egui::Context, ui: &mut e
         response_max_height,
         None,
     );
+}
+
+fn render_markdown_like_response(app: &AiPopupApp, ui: &mut egui::Ui) {
+    let response = app.response.trim_end();
+    if response.is_empty() {
+        return;
+    }
+
+    let mut in_code_block = false;
+    let mut code_block = Vec::new();
+
+    for line in response.lines() {
+        let trimmed = line.trim_end();
+
+        if trimmed.trim_start().starts_with("```") {
+            if in_code_block {
+                render_code_block(app, ui, &code_block.join("\n"));
+                code_block.clear();
+                in_code_block = false;
+            } else {
+                in_code_block = true;
+            }
+            continue;
+        }
+
+        if in_code_block {
+            code_block.push(trimmed.to_string());
+            continue;
+        }
+
+        render_markdown_line(app, ui, trimmed);
+    }
+
+    if in_code_block {
+        render_code_block(app, ui, &code_block.join("\n"));
+    }
+}
+
+fn render_markdown_line(app: &AiPopupApp, ui: &mut egui::Ui, line: &str) {
+    let trimmed = line.trim_start();
+
+    if trimmed.is_empty() {
+        ui.add_space(4.0);
+        return;
+    }
+
+    if let Some((level, content)) = parse_heading_line(trimmed) {
+        let size = match level {
+            1 => 20.0,
+            2 => 18.0,
+            _ => 16.0,
+        };
+        render_inline_markdown_label(ui, app, content, size, app.theme.text_color, false);
+        return;
+    }
+
+    if let Some(content) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("•").color(app.theme.text_color));
+            render_inline_markdown_label(
+                ui,
+                app,
+                content.trim(),
+                14.0,
+                app.theme.text_color,
+                false,
+            );
+        });
+        return;
+    }
+
+    if let Some((index, content)) = parse_numbered_list_line(trimmed) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                egui::RichText::new(format!("{index}."))
+                    .size(14.0)
+                    .color(app.theme.text_color),
+            );
+            render_inline_markdown_label(ui, app, content, 14.0, app.theme.text_color, false);
+        });
+        return;
+    }
+
+    if let Some(content) = trimmed.strip_prefix("> ") {
+        render_inline_markdown_label(ui, app, content, 14.0, app.theme.weak_text_color, true);
+        return;
+    }
+
+    if let Some((text, url)) = parse_single_link_line(trimmed) {
+        ui.hyperlink_to(text, url);
+        return;
+    }
+
+    render_inline_markdown_label(ui, app, trimmed, 14.0, app.theme.text_color, false);
+}
+
+fn render_code_block(app: &AiPopupApp, ui: &mut egui::Ui, code: &str) {
+    if code.trim().is_empty() {
+        return;
+    }
+
+    egui::Frame::none()
+        .fill(app.theme.panel_fill_soft)
+        .stroke(egui::Stroke::new(
+            1.0,
+            app.theme.border_color.gamma_multiply(0.25),
+        ))
+        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+        .rounding(egui::Rounding::same(8.0))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(code)
+                        .monospace()
+                        .size(13.0)
+                        .color(app.theme.text_color),
+                )
+                .wrap(true),
+            );
+        });
+}
+
+fn parse_heading_line(line: &str) -> Option<(usize, &str)> {
+    let hash_count = line.chars().take_while(|c| *c == '#').count();
+    if !(1..=6).contains(&hash_count) {
+        return None;
+    }
+
+    let content = line.get(hash_count..)?.trim_start();
+    if content.is_empty() {
+        return None;
+    }
+
+    Some((hash_count, content))
+}
+
+fn parse_numbered_list_line(line: &str) -> Option<(usize, &str)> {
+    let dot_index = line.find('.')?;
+    if dot_index == 0 {
+        return None;
+    }
+
+    let (prefix, tail) = line.split_at(dot_index);
+    if !prefix.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
+    let content = tail.strip_prefix('.')?.trim_start();
+    if content.is_empty() {
+        return None;
+    }
+
+    Some((prefix.parse().ok()?, content))
+}
+
+fn parse_single_link_line(line: &str) -> Option<(&str, &str)> {
+    if !(line.starts_with('[') && line.ends_with(')')) {
+        return None;
+    }
+
+    let text_end = line.find("](")?;
+    let text = line.get(1..text_end)?;
+    let url = line.get(text_end + 2..line.len() - 1)?;
+    if text.is_empty() || url.is_empty() {
+        return None;
+    }
+    Some((text, url))
+}
+
+fn render_inline_markdown_label(
+    ui: &mut egui::Ui,
+    app: &AiPopupApp,
+    text: &str,
+    size: f32,
+    color: egui::Color32,
+    base_italics: bool,
+) {
+    ui.label(inline_markdown_job(app, text, size, color, base_italics));
+}
+
+fn inline_markdown_job(
+    app: &AiPopupApp,
+    text: &str,
+    size: f32,
+    color: egui::Color32,
+    base_italics: bool,
+) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    let mut plain = String::new();
+    let mut rest = text;
+
+    while !rest.is_empty() {
+        if let Some(content) = parse_inline_segment(&mut rest, "**", "**") {
+            flush_plain_segment(
+                &mut job,
+                &mut plain,
+                size,
+                color,
+                false,
+                base_italics,
+                false,
+            );
+            append_inline_segment(
+                &mut job,
+                content,
+                size,
+                color,
+                true,
+                base_italics,
+                false,
+                app.theme.panel_fill_soft,
+            );
+            continue;
+        }
+
+        if let Some(content) = parse_inline_segment(&mut rest, "`", "`") {
+            flush_plain_segment(
+                &mut job,
+                &mut plain,
+                size,
+                color,
+                false,
+                base_italics,
+                false,
+            );
+            append_inline_segment(
+                &mut job,
+                content,
+                size,
+                color,
+                false,
+                false,
+                true,
+                app.theme.panel_fill_soft,
+            );
+            continue;
+        }
+
+        if let Some(content) = parse_inline_segment(&mut rest, "*", "*") {
+            flush_plain_segment(
+                &mut job,
+                &mut plain,
+                size,
+                color,
+                false,
+                base_italics,
+                false,
+            );
+            append_inline_segment(
+                &mut job,
+                content,
+                size,
+                color,
+                false,
+                true,
+                false,
+                app.theme.panel_fill_soft,
+            );
+            continue;
+        }
+
+        if let Some(ch) = rest.chars().next() {
+            plain.push(ch);
+            rest = &rest[ch.len_utf8()..];
+        } else {
+            break;
+        }
+    }
+
+    flush_plain_segment(
+        &mut job,
+        &mut plain,
+        size,
+        color,
+        false,
+        base_italics,
+        false,
+    );
+    job
+}
+
+fn parse_inline_segment<'a>(rest: &mut &'a str, start: &str, end: &str) -> Option<&'a str> {
+    if !rest.starts_with(start) {
+        return None;
+    }
+
+    let after_start = &rest[start.len()..];
+    let end_index = after_start.find(end)?;
+    if end_index == 0 {
+        return None;
+    }
+
+    let content = &after_start[..end_index];
+    *rest = &after_start[end_index + end.len()..];
+    Some(content)
+}
+
+fn flush_plain_segment(
+    job: &mut LayoutJob,
+    plain: &mut String,
+    size: f32,
+    color: egui::Color32,
+    bold: bool,
+    italics: bool,
+    code: bool,
+) {
+    if plain.is_empty() {
+        return;
+    }
+    let text = std::mem::take(plain);
+    append_inline_segment(
+        job,
+        &text,
+        size,
+        color,
+        bold,
+        italics,
+        code,
+        egui::Color32::TRANSPARENT,
+    );
+}
+
+fn append_inline_segment(
+    job: &mut LayoutJob,
+    text: &str,
+    size: f32,
+    color: egui::Color32,
+    bold: bool,
+    italics: bool,
+    code: bool,
+    code_background: egui::Color32,
+) {
+    if text.is_empty() {
+        return;
+    }
+
+    let mut format = TextFormat {
+        font_id: if code {
+            egui::FontId::monospace((size - 1.0).max(11.0))
+        } else {
+            egui::FontId::proportional(size)
+        },
+        color,
+        italics,
+        ..Default::default()
+    };
+
+    if bold {
+        format.font_id = egui::FontId::proportional(size + 0.8);
+    }
+
+    if code {
+        format.background = code_background;
+    }
+
+    job.append(text, 0.0, format);
 }
 
 fn section_label(text: &str, color: egui::Color32) -> egui::RichText {

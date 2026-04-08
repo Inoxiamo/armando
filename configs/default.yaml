@@ -37,4 +37,4 @@ claude:
   model: claude-3-5-sonnet-latest
 ollama:
   base_url: http://localhost:11434
-  model: tinyllama
+  model: gemma4:e2b

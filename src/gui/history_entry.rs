@@ -75,7 +75,7 @@ pub(super) fn history_entry_card(
         ui.horizontal_wrapped(|ui| {
             let copy_button = super::secondary_action_button(copy_label, theme.panel_fill_soft);
             if ui.add(copy_button).clicked() {
-                media_io::copy_text_to_clipboard(&entry.response);
+                media_io::copy_markdown_rendered_text_to_clipboard(&entry.response);
                 *history_action_error = None;
             }
 
